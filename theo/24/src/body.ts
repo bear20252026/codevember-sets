@@ -1,0 +1,405 @@
+// The body: a tube swept along the physics chain, rebuilt every frame. Its cross-section is a
+// snake's, not a hose's: a flat belly with rounded corners, higher sides, a low ridge along the
+// spine for the python, and a plain circle at the neck so it fits the Blender head.
+// Each vertex also carries where it is on the skin (scale coordinates, which never slide) and
+// how stretched it is: on the outside of a bend the scales part and the skin shows between.
+import * as THREE from 'three';
+import type { Snake, World } from './physics';
+
+const SUB = 2; // rings per sphere
+const SUB_NECK = 6; // finer along the first sphere behind the head, so a sharp bend never kinks or opens
+const SUB_TAIL = 6; // and along the tail's taper, where a coarse ring shows as a facet
+const TAIL = 5; // spheres at the end drawn that fine
+const CAP = 10; // rings in the rounded tip past the last sphere
+const CAP_LEN = 3.2; // the tip's length, in radii of the last sphere: a long rounded point
+const SEC = 8; // directions the occlusion is worked out in
+const SEC_SX = Float32Array.from({ length: SEC }, (_, k) => Math.sin((k / SEC) * Math.PI * 2));
+const SEC_SY = Float32Array.from({ length: SEC }, (_, k) => -Math.cos((k / SEC) * Math.PI * 2));
+
+export interface Body {
+  mesh: THREE.Mesh;
+  update(time: number, world: World, updateAO?: boolean): void;
+  /** where the head goes: the neck ring centre and its frame */
+  neck: { pos: THREE.Vector3; fwd: THREE.Vector3; up: THREE.Vector3 };
+}
+
+function profileTable(rad: number, n: number, top: number, bottom: number, ridge: number, bottomE = 3.4 * (n / 2.2)) {
+  const pts = new Float32Array((rad + 1) * 2);
+  const nor = new Float32Array((rad + 1) * 2);
+  const spow = (a: number, p: number) => Math.sign(a) * Math.abs(a) ** p;
+  const at = (al: number): [number, number] => {
+    const c = Math.cos(al), s = Math.sin(al);
+    const isTop = c < 0;
+    const e = isTop ? n : bottomE;
+    const x = 1.0 * spow(s, 2 / e);
+    let y = (isTop ? top : bottom) * spow(-c, 2 / e);
+    const da = al - Math.PI;
+    y += ridge * Math.exp(-(da * da) / 0.09);
+    return [x, y];
+  };
+  for (let j = 0; j <= rad; j++) {
+    const al = (j / rad) * Math.PI * 2;
+    const [x, y] = at(al);
+    const [x1, y1] = at(al + 1e-3);
+    const [x0, y0] = at(al - 1e-3);
+    const tx = x1 - x0, ty = y1 - y0;
+    // outward: tangent rotated (the profile runs counter-clockwise seen from the tail)
+    let nx = ty, ny = -tx;
+    const l = Math.hypot(nx, ny) || 1;
+    nx /= l; ny /= l;
+    pts[j * 2] = x; pts[j * 2 + 1] = y;
+    nor[j * 2] = nx; nor[j * 2 + 1] = ny;
+  }
+  return { pts, nor };
+}
+
+export function createBody(s: Snake, material: THREE.Material, opts: { rad?: number; aoStride?: number } = {}): Body {
+  const RAD = opts.rad ?? 36;
+  const aoStride = opts.aoStride ?? 2;
+  const sp = s.sp;
+  const K = s.headK;
+  const np = s.n - K;
+  // one short collar ring tucked just inside the head's back rim (0.03 of head length: deep enough
+  // to seal any chord gap, short enough to stay inside the flatter colubrid skull and chin), then
+  // the rim ring itself at K, then a fine neck segment into the body, and the fine tail + tip
+  const PLUG = 1;
+  const plugDepth = (0.03 * sp.headLength) / s.seg;
+  const last = s.n - 1;
+  const tail = Math.min(TAIL, np - 2);
+  const capF = (CAP_LEN * s.rad[last]) / s.seg; // the tip's length, in spheres
+  const fs: number[] = [K - plugDepth];
+  for (let q = 0; q < SUB_NECK; q++) fs.push(K + q / SUB_NECK);
+  for (let q = 0; K + 1 + q / SUB < last - tail - 1e-6; q++) fs.push(K + 1 + q / SUB);
+  for (let q = 0; q <= tail * SUB_TAIL; q++) fs.push(last - tail + q / SUB_TAIL);
+  for (let q = 1; q <= CAP; q++) fs.push(last + capF * Math.sin((q / CAP) * Math.PI / 2));
+  const rings = fs.length;
+  const vcount = rings * (RAD + 1);
+  const pos = new Float32Array(vcount * 3);
+  const nor = new Float32Array(vcount * 3);
+  const tan = new Float32Array(vcount * 3);
+  const body = new Float32Array(vcount * 4); // a (scale units along), v (round), radius, stretch
+  const body2 = new Float32Array(vcount * 2); // s (metres along), metres per scale unit
+  const ao = new Float32Array(vcount);
+  const idx: number[] = [];
+  for (let r = 0; r < rings - 1; r++) {
+    for (let j = 0; j < RAD; j++) {
+      const a = r * (RAD + 1) + j, b = a + 1, c = a + RAD + 2, d = a + RAD + 1;
+      idx.push(a, b, c, a, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage);
+  const norAttr = new THREE.BufferAttribute(nor, 3).setUsage(THREE.DynamicDrawUsage);
+  const tanAttr = new THREE.BufferAttribute(tan, 3).setUsage(THREE.DynamicDrawUsage);
+  const bodyAttr = new THREE.BufferAttribute(body, 4).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', posAttr);
+  geo.setAttribute('normal', norAttr);
+  geo.setAttribute('aTan', tanAttr);
+  geo.setAttribute('aBody', bodyAttr);
+  geo.setAttribute('aBody2', new THREE.BufferAttribute(body2, 2));
+  const aoAttr = new THREE.BufferAttribute(ao, 1).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('aAO', aoAttr);
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.frustumCulled = false;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  const shapeBody = profileTable(RAD, sp.shape === 'python' ? 2.1 : 2.4, 0.95, 0.8, sp.shape === 'python' ? 0.07 : 0.02);
+  // an exact circle (e = 2 top and bottom) to match the head's back rim (model/heads.py, u = 0)
+  const shapeNeck = profileTable(RAD, 2, 1, 1, 0, 2);
+  // half the inscribed-polygon sagitta so the rim stays flush with the 192-gon head at any RAD
+  const rimFit = 0.5 + 0.5 / Math.cos(Math.PI / RAD);
+
+  // rest layout, fixed: arc length, radius, scale coordinate of each ring
+  const ringS = new Float32Array(rings);
+  const ringR = new Float32Array(rings);
+  const ringF = new Float32Array(rings); // fractional sphere index
+  const ringA = new Float32Array(rings);
+  const ringM = new Float32Array(rings);
+  // radius along the chain: a Catmull-Rom through the spheres' (not straight lines between them,
+  // which made the taper a run of cones); past the last one, the tip: half an ellipse
+  const radAt = (f: number) => {
+    const i = Math.floor(f), t = f - i;
+    const g = (k: number) => s.rad[Math.min(last, Math.max(K, k))];
+    const p0 = g(i - 1), p1 = g(i), p2 = g(i + 1), p3 = g(i + 2);
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  };
+  for (let r = 0; r < rings; r++) {
+    const f = fs[r];
+    ringF[r] = f;
+    ringS[r] = (f - K) * s.seg;
+    if (r < PLUG) ringR[r] = sp.neck * 0.95;
+    else if (r === PLUG) ringR[r] = sp.neck * rimFit;
+    else if (f <= last) ringR[r] = radAt(f);
+    else {
+      const x = (f - last) / capF;
+      ringR[r] = s.rad[last] * Math.sqrt(Math.max(0, 1 - x * x));
+    }
+  }
+  // how fast the radius changes along: the surface's normal leans back by it (a taper is a cone,
+  // not a cylinder, in the light). Not at the plug, which steps in under the head
+  const ringDR = new Float32Array(rings);
+  for (let r = PLUG + 1; r < rings; r++) {
+    const a = r - 1, b = Math.min(rings - 1, r + 1);
+    ringDR[r] = (ringR[b] - ringR[a]) / Math.max(1e-6, (ringF[b] - ringF[a]) * s.seg);
+  }
+  // dorsal scale: row spacing from the girth, length from the aspect; the coordinate along is
+  // the integral of 1 / length, so scales shrink toward neck and tail as on the animal
+  for (let r = 0; r < rings; r++) {
+    const rr = Math.max(ringR[r], sp.neck * 0.25);
+    const spacing = ((1 - sp.ventralWidth) * 2 * Math.PI * rr) / sp.rows;
+    ringM[r] = spacing * sp.scaleAspect;
+    ringA[r] = r === 0 ? ringS[0] / ringM[r] : ringA[r - 1] + (ringS[r] - ringS[r - 1]) / ringM[r];
+  }
+  // metres along, metres per scale, and the fixed body coords never change: written once
+  for (let r = 0; r < rings; r++) {
+    const rrFixed = Math.max(ringR[r], sp.neck * 0.25);
+    for (let j = 0; j <= RAD; j++) {
+      const o = r * (RAD + 1) + j;
+      body2[o * 2] = ringS[r];
+      body2[o * 2 + 1] = ringM[r];
+      body[o * 4] = ringA[r];
+      body[o * 4 + 1] = j / RAD;
+      body[o * 4 + 2] = rrFixed;
+      body[o * 4 + 3] = 1;
+    }
+  }
+
+  const C = new Float32Array(rings * 3);
+  const T = new Float32Array(rings * 3);
+  const U = new Float32Array(rings * 3);
+  // occlusion sampled every aoStride rings and linearly blended between them
+  const ringSec = new Float32Array(rings * SEC);
+  const secK0 = new Uint8Array(RAD + 1);
+  const secK1 = new Uint8Array(RAD + 1);
+  const secFt = new Float32Array(RAD + 1);
+  for (let j = 0; j <= RAD; j++) {
+    const f = (j / RAD) * SEC;
+    secK0[j] = Math.floor(f) % SEC;
+    secK1[j] = (secK0[j] + 1) % SEC;
+    secFt[j] = f - Math.floor(f);
+  }
+  let hasAO = false;
+  // the spine drawn is the chain itself: on its track it is as smooth as the track
+  const P = s.pos;
+  const v3 = new THREE.Vector3();
+  const neck = { pos: new THREE.Vector3(), fwd: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) };
+
+  function point(f: number, out: Float32Array, o: number) {
+    // Catmull-Rom through the spheres
+    const n = s.n;
+    const i = Math.floor(f);
+    const t = f - i;
+    const g = (k: number, a: number) => P[Math.min(n - 1, Math.max(0, k)) * 3 + a];
+    for (let a = 0; a < 3; a++) {
+      const p0 = g(i - 1, a), p1 = g(i, a), p2 = g(i + 1, a), p3 = g(i + 2, a);
+      const t2 = t * t, t3 = t2 * t;
+      out[o + a] = 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+    }
+  }
+
+  // spheres near a ring, from either snake, that can shade it
+  const near: number[] = [];
+  let gr = 0;
+  let gx = 0, gy = 0, gz = 0;
+  let gWorld: World;
+  const visit = (k: number, i: number) => {
+    const o = gWorld.snakes[k];
+    if (o === s && Math.abs(i - ringF[gr]) < 5) return;
+    const dx = o.pos[i * 3] - gx, dy = o.pos[i * 3 + 1] - gy, dz = o.pos[i * 3 + 2] - gz;
+    const R = ringR[gr] + 0.025 + o.rad[i];
+    if (dx * dx + dy * dy + dz * dz < R * R) near.push(o.pos[i * 3], o.pos[i * 3 + 1], o.pos[i * 3 + 2], o.rad[i]);
+  };
+  function gather(r: number, world: World) {
+    near.length = 0;
+    gr = r; gx = C[r * 3]; gy = C[r * 3 + 1]; gz = C[r * 3 + 2]; gWorld = world;
+    world.near(gx, gz, visit);
+  }
+
+  function update(time: number, world: World, updateAO = true) {
+    // centres: the collar sits straight inside the head; the first neck segment [K, K+1] is a cubic
+    // Hermite leaving P[K] along the head's own axis (no kink at the seam, so no gap opens on a bend)
+    // and meeting the body's Catmull-Rom tangent at P[K+1]
+    const fx = P[K * 3] - P[0], fy = P[K * 3 + 1] - P[1], fz = P[K * 3 + 2] - P[2];
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    const uxH = fx / fl, uyH = fy / fl, uzH = fz / fl; // backward along the head's axis
+    const neckStep = Math.hypot(P[(K + 1) * 3] - P[K * 3], P[(K + 1) * 3 + 1] - P[K * 3 + 1], P[(K + 1) * 3 + 2] - P[K * 3 + 2]) || s.seg;
+    for (let r = 0; r < rings; r++) {
+      const f = ringF[r];
+      if (r < PLUG) {
+        const back = (K - f) * s.seg;
+        C[r * 3] = P[K * 3] - uxH * back;
+        C[r * 3 + 1] = P[K * 3 + 1] - uyH * back;
+        C[r * 3 + 2] = P[K * 3 + 2] - uzH * back;
+      } else if (f < K + 1) {
+        const t = f - K, t2 = t * t, t3 = t2 * t;
+        const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t;
+        const h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+        for (let a = 0; a < 3; a++) {
+          const p0 = P[K * 3 + a], p1 = P[(K + 1) * 3 + a];
+          const m0 = (a === 0 ? uxH : a === 1 ? uyH : uzH) * neckStep;
+          const m1 = 0.5 * (P[(K + 2) * 3 + a] - p0);
+          C[r * 3 + a] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
+        }
+      } else if (f > last) {
+        // the tip carries on the line the chain ends on
+        const tx = P[last * 3] - P[(last - 1) * 3], ty = P[last * 3 + 1] - P[(last - 1) * 3 + 1], tz = P[last * 3 + 2] - P[(last - 1) * 3 + 2];
+        const k = f - last;
+        C[r * 3] = P[last * 3] + tx * k; C[r * 3 + 1] = P[last * 3 + 1] + ty * k; C[r * 3 + 2] = P[last * 3 + 2] + tz * k;
+      } else point(f, C, r * 3);
+    }
+    // tangents toward the tail, then an up that follows the world's but never flips
+    for (let r = 0; r < rings; r++) {
+      let x: number, y: number, z: number;
+      if (r <= PLUG) {
+        // locked to the head's axis so the rim ring sits dead in the head's back plane
+        x = uxH; y = uyH; z = uzH;
+      } else {
+        const a = r - 1, b = Math.min(rings - 1, r + 1);
+        x = C[b * 3] - C[a * 3]; y = C[b * 3 + 1] - C[a * 3 + 1]; z = C[b * 3 + 2] - C[a * 3 + 2];
+        const l = Math.hypot(x, y, z) || 1;
+        x /= l; y /= l; z /= l;
+      }
+      T[r * 3] = x; T[r * 3 + 1] = y; T[r * 3 + 2] = z;
+      // world up, minus its part along the body
+      let ux = -y * x, uy = 1 - y * y, uz = -y * z;
+      const wl = Math.hypot(ux, uy, uz);
+      if (r > 0) {
+        // the previous up carried over
+        let px = U[(r - 1) * 3], py = U[(r - 1) * 3 + 1], pz = U[(r - 1) * 3 + 2];
+        const d = px * x + py * y + pz * z;
+        px -= d * x; py -= d * y; pz -= d * z;
+        const pl = Math.hypot(px, py, pz) || 1;
+        const w = 0.25 * Math.min(1, wl * 1.5);
+        ux = (px / pl) * (1 - w) + (wl > 1e-4 ? ux / wl : 0) * w;
+        uy = (py / pl) * (1 - w) + (wl > 1e-4 ? uy / wl : 0) * w;
+        uz = (pz / pl) * (1 - w) + (wl > 1e-4 ? uz / wl : 0) * w;
+      }
+      const ul = Math.hypot(ux, uy, uz) || 1;
+      U[r * 3] = ux / ul; U[r * 3 + 1] = uy / ul; U[r * 3 + 2] = uz / ul;
+    }
+    const breath = 1 + 0.018 * Math.sin(time * 1.1 + s.pathIndex);
+    const doAO = updateAO || !hasAO;
+    if (doAO) {
+      hasAO = true;
+      // sample body-on-body occlusion at every aoStride rings and interpolate the rings between
+      let prevR = -1;
+      for (let r = 0; r < rings; r++) {
+        if (r % aoStride !== 0 && r !== rings - 1) continue;
+        gather(r, world);
+        const tx = T[r * 3], ty = T[r * 3 + 1], tz = T[r * 3 + 2];
+        const ux = U[r * 3], uy = U[r * 3 + 1], uz = U[r * 3 + 2];
+        const lx = uy * tz - uz * ty, ly = uz * tx - ux * tz, lz = ux * ty - uy * tx;
+        const R = ringR[r];
+        const mid = Math.min(1, Math.max(0, (ringS[r] - 0.1) / 0.2)) * Math.max(0, 1 - ringS[r] / (sp.length * 0.8));
+        const rr = R * (1 + (breath - 1) * mid);
+        const ro = r * SEC;
+        for (let k = 0; k < SEC; k++) {
+          const sx = SEC_SX[k], sy = SEC_SY[k];
+          const wx = lx * sx + ux * sy, wy = ly * sx + uy * sy, wz = lz * sx + uz * sy;
+          const vx = C[r * 3] + wx * rr, vy = C[r * 3 + 1] + wy * rr, vz = C[r * 3 + 2] + wz * rr;
+          let occ = 0;
+          for (let q = 0; q < near.length; q += 4) {
+            const dx = near[q] - vx, dy = near[q + 1] - vy, dz = near[q + 2] - vz;
+            const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-4;
+            const facing = (dx * wx + dy * wy + dz * wz) / d;
+            if (facing <= 0) continue;
+            const rr2 = near[q + 3] / Math.max(d, near[q + 3] * 1.05);
+            occ += facing * rr2 * rr2 * 1.1;
+          }
+          ringSec[ro + k] = occ;
+        }
+        if (prevR >= 0 && r - prevR > 1) {
+          const span = r - prevR;
+          const po = prevR * SEC;
+          for (let m = prevR + 1; m < r; m++) {
+            const t = (m - prevR) / span, mo = m * SEC;
+            for (let k = 0; k < SEC; k++) ringSec[mo + k] = ringSec[po + k] + (ringSec[ro + k] - ringSec[po + k]) * t;
+          }
+        }
+        prevR = r;
+      }
+    }
+    for (let r = 0; r < rings; r++) {
+      const tx = T[r * 3], ty = T[r * 3 + 1], tz = T[r * 3 + 2];
+      const ux = U[r * 3], uy = U[r * 3 + 1], uz = U[r * 3 + 2];
+      // side = up x tangent
+      const lx = uy * tz - uz * ty, ly = uz * tx - ux * tz, lz = ux * ty - uy * tx;
+      // curvature, in the ring's frame
+      const a = Math.max(0, r - 1), b = Math.min(rings - 1, r + 1);
+      const ds = Math.max(1e-4, (ringF[b] - ringF[a]) * s.seg);
+      const kx = (T[b * 3] - T[a * 3]) / ds, ky = (T[b * 3 + 1] - T[a * 3 + 1]) / ds, kz = (T[b * 3 + 2] - T[a * 3 + 2]) / ds;
+      const kl = kx * lx + ky * ly + kz * lz;
+      const ku = kx * ux + ky * uy + kz * uz;
+      const R = ringR[r];
+      const dR = ringDR[r];
+      const mid = Math.min(1, Math.max(0, (ringS[r] - 0.1) / 0.2)) * Math.max(0, 1 - ringS[r] / (sp.length * 0.8));
+      const rr = R * (1 + (breath - 1) * mid);
+      const nb = Math.min(1, Math.max(0, ringS[r] / 0.07)); // neck: round, body: snake
+      const drop = rr * 0.06 * nb; // the flat belly sits on the ground
+      const cx = C[r * 3], cy = C[r * 3 + 1], cz = C[r * 3 + 2];
+      const ro = r * SEC;
+      const tip = R <= 1e-6;
+      for (let j = 0; j <= RAD; j++) {
+        const o = r * (RAD + 1) + j;
+        let px: number, py: number, nx: number, ny: number;
+        if (nb >= 1) {
+          px = shapeBody.pts[j * 2]; py = shapeBody.pts[j * 2 + 1];
+          nx = shapeBody.nor[j * 2]; ny = shapeBody.nor[j * 2 + 1];
+        } else if (nb <= 0) {
+          px = shapeNeck.pts[j * 2]; py = shapeNeck.pts[j * 2 + 1];
+          nx = shapeNeck.nor[j * 2]; ny = shapeNeck.nor[j * 2 + 1];
+        } else {
+          px = shapeNeck.pts[j * 2] * (1 - nb) + shapeBody.pts[j * 2] * nb;
+          py = shapeNeck.pts[j * 2 + 1] * (1 - nb) + shapeBody.pts[j * 2 + 1] * nb;
+          nx = shapeNeck.nor[j * 2] * (1 - nb) + shapeBody.nor[j * 2] * nb;
+          ny = shapeNeck.nor[j * 2 + 1] * (1 - nb) + shapeBody.nor[j * 2 + 1] * nb;
+          const nl = Math.hypot(nx, ny) || 1;
+          nx /= nl; ny /= nl;
+        }
+        const ox = px * rr, oy = py * rr - drop;
+        const pvx = cx + lx * ox + ux * oy, pvy = cy + ly * ox + uy * oy, pvz = cz + lz * ox + uz * oy;
+        pos[o * 3] = pvx; pos[o * 3 + 1] = pvy; pos[o * 3 + 2] = pvz;
+        // leaning back by the taper; at the very point, straight along
+        let qx: number, qy: number, qz: number;
+        if (tip) {
+          qx = tx; qy = ty; qz = tz;
+        } else {
+          qx = lx * nx + ux * ny - dR * tx; qy = ly * nx + uy * ny - dR * ty; qz = lz * nx + uz * ny - dR * tz;
+          if (dR !== 0) {
+            const ql = Math.hypot(qx, qy, qz) || 1;
+            qx /= ql; qy /= ql; qz /= ql;
+          }
+        }
+        nor[o * 3] = qx; nor[o * 3 + 1] = qy; nor[o * 3 + 2] = qz;
+        tan[o * 3] = tx; tan[o * 3 + 1] = ty; tan[o * 3 + 2] = tz;
+        // stretch: the outside of a bend is longer than the centre line
+        const st = 1 - (kl * px + ku * py) * rr;
+        body[o * 4 + 3] = Math.min(1.8, Math.max(0.6, st));
+        if (doAO) {
+          // occlusion: the ground under it and the bodies against it
+          const k0 = secK0[j], k1 = secK1[j];
+          let occ = ringSec[ro + k0] + (ringSec[ro + k1] - ringSec[ro + k0]) * secFt[j];
+          occ += Math.max(0, -qy) * Math.max(0, 1 - pvy / 0.035) * 0.9 + Math.max(0, 1 - pvy / 0.012) * 0.3;
+          ao[o] = 1 / (1 + 1.6 * occ);
+        }
+      }
+    }
+    posAttr.needsUpdate = true;
+    norAttr.needsUpdate = true;
+    tanAttr.needsUpdate = true;
+    bodyAttr.needsUpdate = true;
+    if (doAO) aoAttr.needsUpdate = true;
+
+    // the neck frame for the head
+    const r0 = PLUG;
+    neck.pos.set(C[r0 * 3], C[r0 * 3 + 1], C[r0 * 3 + 2]);
+    neck.fwd.set(fx, fy, fz).normalize().negate();
+    v3.set(U[r0 * 3], U[r0 * 3 + 1], U[r0 * 3 + 2]);
+    neck.up.copy(v3).addScaledVector(neck.fwd, -v3.dot(neck.fwd)).normalize();
+  }
+
+  return { mesh, update, neck };
+}

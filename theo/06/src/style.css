@@ -1,0 +1,118 @@
+html, body, #root { margin: 0; height: 100%; background: #0b0c0f; overflow: hidden; }
+canvas { display: block; }
+/* The title plate (docs/DESIGN.md): top left, the only way home. Only the link takes a press. */
+.plate {
+  position: fixed; z-index: 2;
+  top: max(24px, env(safe-area-inset-top)); left: max(24px, env(safe-area-inset-left));
+  pointer-events: none;
+  color: #f4f4f2;
+  font: 13px/1.4 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+.plate b {
+  display: block; white-space: nowrap;
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 56px; font-weight: 700; letter-spacing: -0.02em; line-height: 0.9;
+  text-transform: uppercase;
+}
+.plate .head > i {
+  display: block; margin-top: 6px;
+  font-style: normal; font-weight: 600; font-size: 14px; line-height: 1.15;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.plate .home span[lang="ja"] { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif; letter-spacing: 0.06em; }
+a.home { color: inherit; text-decoration: none; pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+@media (max-width: 640px) {
+  .plate { left: max(16px, env(safe-area-inset-left)); top: max(16px, env(safe-area-inset-top)); }
+  .plate b { font-size: 36px; }
+  .plate .head > i { font-size: 10px; }
+}
+
+
+.info {
+  position: fixed; right: 28px; top: 50%; transform: translateY(-50%); width: 264px; padding: 20px 22px 18px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.4; color: #111;
+  /* An Apple style panel: plain black in a squircle (a true squircle where corner-shape is supported). */
+  background: #000; border-radius: 30px; corner-shape: squircle;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+@supports not (corner-shape: squircle) { .info { border-radius: 22px; } }
+.info h2 { margin: 0 0 4px; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; }
+.info .flavour { margin: 0 0 12px; opacity: 0.6; }
+.info .curiosity { margin: 0 0 16px; }
+.info p, .info dd.names { text-wrap: pretty; } /* no lone word on the last line */
+.info dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+.info dt { opacity: 0.5; }
+.info dd { margin: 0; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.info dd.names { font-variant-numeric: normal; line-height: 1.35; }
+body[data-theme="dark"] .info { color: #f2f2f2; }
+/* On phones the panel would cover the whole view: left out, the planet list and the flight are enough. */
+@media (max-width: 640px) {
+  .info { display: none; }
+}
+
+
+/* Dark room: the page and its text follow the scene's background. */
+body[data-theme="dark"], body[data-theme="dark"] #root { background: #0b0c0f; }
+
+/* The planet list down the left: bold Helvetica, the picked one full strength. */
+.planets {
+  position: fixed; left: 28px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 2px; max-width: 300px;
+}
+.planets button {
+  border: 0; background: none; padding: 3px 0; text-align: left; cursor: pointer; color: #111;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 700;
+  opacity: 1; transition: color 0.25s;
+}
+/* White; the picked one in its own colour (set inline, as its orbit's). */
+.planets button { font-size: 22px; letter-spacing: -0.02em; line-height: 1.1; }
+body[data-theme="dark"] .planets button { color: #f2f2f2; }
+@media (max-width: 640px) {
+  .planets { left: 16px; top: 88px; transform: none; max-width: 60vw; } /* under the title block */
+  .planets button { font-size: 15px; }
+}
+
+/* Time, along the bottom: play big on the left, the date beside it, the speeds under the date, all on the page. */
+.transport {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px; /* play and the date, the speeds under */
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #f2f2f2;
+}
+.transport .now { display: flex; align-items: center; gap: 14px; }
+.transport button { border: 0; background: none; padding: 0; cursor: pointer; color: inherit; font: inherit; }
+.transport .play { box-sizing: border-box; width: 34px; height: 34px; padding: 6px; border: 3px solid currentColor; border-radius: 50%; opacity: 0.95; } /* in a thick round ring */
+.transport .play svg { display: block; width: 100%; height: 100%; }
+.transport .play:hover { opacity: 1; }
+.transport .when { width: 9.6ch; padding: 0; border: 0; outline: none; background: none; color: inherit; font-family: inherit; caret-color: currentColor; cursor: text; white-space: nowrap; font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.05; }
+.transport .speeds { display: flex; justify-content: center; gap: 24px; font-size: 26px; font-weight: 700; }
+.transport .speeds button { opacity: 0.4; font-variant-numeric: tabular-nums; }
+.transport .speeds button:hover { opacity: 0.75; }
+.transport .speeds button.on { opacity: 1; }
+.transport .when::placeholder { color: inherit; opacity: 0.3; }
+
+
+
+
+
+/* The opening: the list and the time controls come in as the sun lights up. */
+.planets, .transport { transition: opacity 2s ease 3s; }
+body:not(.lit) .planets, body:not(.lit) .transport { opacity: 0; pointer-events: none; }
+
+/* The loader: a small solar system in the ink, mid screen. It shows from the first paint (the plate with it)
+   and fades as the sun lights. ?loader holds it (intro.ts). */
+.loader {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2;
+  color: #f4f4f2; pointer-events: none;
+  transition: opacity 0.8s ease, visibility 0s;
+}
+body.lit .loader { opacity: 0; visibility: hidden; transition-delay: 0s, 0.8s; } /* hidden after the fade: the orbits stop drawing */
+.loader svg { display: block; overflow: visible; }
+.loader .ring { fill: none; stroke: currentColor; stroke-width: 0.6; opacity: 0.25; }
+.loader .sun, .loader .orbit circle { fill: currentColor; }
+.loader .orbit { transform-origin: 60px 60px; animation: loader-orbit linear infinite; }
+.loader .o1 { animation-duration: 1.6s; }
+.loader .o2 { animation-duration: 3.2s; animation-delay: -1.1s; }
+.loader .o3 { animation-duration: 5.6s; animation-delay: -3.9s; }
+@keyframes loader-orbit { to { transform: rotate(360deg); } }
+

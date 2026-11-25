@@ -1,0 +1,209 @@
+/* a dark day: the backdrop is the grass, ink #f4f4f2 (docs/DESIGN.md) */
+html, body { margin: 0; height: 100%; background: #a3adb3; overflow: hidden; }
+/* nothing here is text to take away: a finger held on the picture paints, it does not select or call up a menu */
+html, body { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#root { position: fixed; inset: 0; }
+/* a little soft all over, as through a lens that is not quite a good one */
+/* (its touches are the page's own, always: the camera controls write touch-action back to auto on the canvas whenever they are made
+   again, and then the browser takes a sideways drag of two fingers for itself) */
+canvas { display: block; touch-action: none !important; filter: blur(var(--soft, 0.5px)); }
+/* the lights of the traffic on a WebGPU canvas of their own (Glow.tsx), added to the picture under it; screen where plus-lighter is not known */
+canvas.glow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; mix-blend-mode: plus-lighter; }
+
+/* the title plate, top left: the day in Plex capitals, the way home under it */
+.plate {
+  position: fixed; z-index: 2;
+  top: max(24px, env(safe-area-inset-top)); left: max(24px, env(safe-area-inset-left));
+  pointer-events: none; user-select: none; -webkit-user-select: none;
+  color: #f4f4f2;
+  font: 13px/1.4 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 14px rgba(0, 0, 0, 0.35); /* white on a busy aerial photo: a soft shade so the small line reads */
+}
+.plate b {
+  display: block; white-space: nowrap;
+  font: 700 56px/0.9 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.02em; text-transform: uppercase;
+}
+.plate .head > i {
+  display: block; margin-top: 6px; font-style: normal;
+  font-weight: 600; font-size: 14px; line-height: 1.15; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.plate .home { color: inherit; text-decoration: none; pointer-events: auto; }
+.plate .home span[lang="ja"] { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif; letter-spacing: 0.06em; }
+@media (max-width: 640px) {
+  .plate { top: max(16px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); }
+  .plate b { font-size: 36px; }
+  .plate .head > i { font-size: 10px; }
+}
+/* ?clean: the scene alone */
+.clean .plate { display: none; }
+
+/* the controls: frosted pills in the day's dark translucent family; round buttons, 40 px at least to press */
+.pill {
+  position: relative; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px;
+  background: rgba(20, 22, 18, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.pill button {
+  appearance: none; border: 0; background: none; color: #f4f4f2; cursor: pointer; flex: none;
+  display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; margin: 0;
+  border-radius: 50%; -webkit-tap-highlight-color: transparent;
+}
+.pill button:hover:not(.on):not(:disabled) { background: rgba(244, 244, 242, 0.12); }
+.pill button.on { background: #f4f4f2; color: #1c1c1c; }
+.pill button:disabled { opacity: 0.35; cursor: default; }
+.pill svg { display: block; }
+
+/* top right: the time, then the overlays */
+.corner {
+  position: fixed; z-index: 2; top: max(20px, env(safe-area-inset-top)); right: max(20px, env(safe-area-inset-right));
+  display: flex; align-items: center; gap: 8px;
+}
+/* the eye, and the list it opens under the bar: what is shown on the picture */
+.view { position: relative; display: flex; }
+.menu {
+  position: absolute; top: calc(100% + 12px); right: -4px; display: grid; gap: 2px; padding: 8px; border-radius: 14px; white-space: nowrap;
+  background: rgba(20, 22, 18, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f4f4f2;
+  font: 600 10px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.menu label { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px 0 8px; border-radius: 9px; cursor: pointer; }
+.menu label:hover { background: rgba(244, 244, 242, 0.12); }
+.menu input { margin: 0; width: 15px; height: 15px; accent-color: #f4f4f2; }
+/* a line with more than two ways to be: its name over a row of small keys, the one it is lit */
+.menu .choice { display: grid; gap: 7px; padding: 8px 8px 6px; }
+.menu .choice > div { display: flex; gap: 4px; }
+.pill .menu .choice button {
+  width: auto; height: 28px; padding: 0 9px; border-radius: 8px; font: inherit; letter-spacing: 0.08em; text-transform: inherit;
+  background: rgba(244, 244, 242, 0.12);
+}
+.pill .menu .choice button:hover:not(.on) { background: rgba(244, 244, 242, 0.24); }
+.pill .menu .choice button.on { background: #f4f4f2; color: #1c1c1c; }
+/* the way back to how it opened: a plain line under the list, not a round button like the bar's */
+.pill .menu button.reset {
+  width: auto; height: 32px; margin-top: 6px; padding: 0 12px; border-radius: 9px; font: inherit; letter-spacing: inherit; text-transform: inherit;
+  background: rgba(244, 244, 242, 0.14);
+}
+.pill .menu button.reset:hover { background: rgba(244, 244, 242, 0.26); }
+/* the hour in figures, left of the bar: white on the picture, shaded as the plate is so it reads on a pale roof */
+.corner .time {
+  color: #f4f4f2; pointer-events: none; font: 600 15px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 14px rgba(0, 0, 0, 0.35);
+}
+/* the clock: its hands show the time, a drag on it winds them */
+.pill button.clock { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pill button.clock:active { cursor: grabbing; }
+.clock .hand { transform-box: view-box; transform-origin: 12px 12px; }
+.clock .hour { transform: rotate(var(--hour, 0deg)); stroke-width: 2; }
+.clock .minute { transform: rotate(var(--minute, 0deg)); }
+
+/* the brushes, all in sight, along the bottom; undo and redo bottom right. One measure all through: 6 px round the
+   edge of a pill and 6 px between one 46 px disc and the next */
+.brushes, .history { position: fixed; z-index: 2; bottom: max(20px, env(safe-area-inset-bottom)); gap: 6px; padding: 6px; }
+.brushes { left: 50%; transform: translateX(-50%); }
+.history { right: max(20px, env(safe-area-inset-right)); }
+.brushes button, .history button { position: relative; width: 46px; height: 46px; }
+/* the size brush and the two it opens over itself */
+.pick { position: relative; display: flex; }
+.pill.choices { position: absolute; left: 50%; bottom: calc(100% + 14px); transform: translateX(-50%); gap: 6px; padding: 6px; }
+/* the gauge of a brush that is a knob: a tall pill over it, filled from the bottom as far as it is set */
+.gauge {
+  position: absolute; left: 50%; bottom: calc(100% + 14px); transform: translateX(-50%); padding: 6px; border-radius: 999px; pointer-events: none;
+  background: rgba(20, 22, 18, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.gauge.pinned { pointer-events: auto; }
+.gauge .track { position: relative; width: 34px; height: 140px; border-radius: 999px; overflow: hidden; background: rgba(244, 244, 242, 0.12); }
+.gauge.pinned .track { cursor: ns-resize; touch-action: none; }
+.gauge .fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--t) * 100%); background: #f4f4f2; }
+.gauge b {
+  position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; color: #f4f4f2; mix-blend-mode: difference;
+  font: 600 11px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; font-variant-numeric: tabular-nums;
+}
+/* the download is an island of its own, right of undo and redo, which move over for it. It is for a desk: where there
+   is no hover, or the screen is narrow, it is left out and they keep the corner */
+.save { position: fixed; z-index: 2; bottom: max(20px, env(safe-area-inset-bottom)); right: max(20px, env(safe-area-inset-right)); padding: 6px; }
+.save button { position: relative; width: 46px; height: 46px; }
+.save .tip { left: auto; right: 0; transform: translate(0, 4px); }
+.history.beside { right: calc(max(20px, env(safe-area-inset-right)) + 66px); }
+.history.beside .tip { left: 50%; right: auto; transform: translate(-50%, 4px); }
+@media (hover: hover) {
+  .save button:hover .tip { transform: translate(0, 0); }
+  .history.beside button:hover:not(:disabled) .tip { transform: translate(-50%, 0); }
+}
+@media (hover: none), (max-width: 640px) {
+  .save { display: none; }
+  .history.beside { right: max(16px, env(safe-area-inset-right)); }
+}
+/* what a button is, over it after a short hover: its name, and its key in a chip */
+.tip {
+  position: absolute; z-index: 2; pointer-events: none; white-space: nowrap; display: flex; align-items: center; gap: 6px;
+  left: 50%; bottom: calc(100% + 12px); transform: translate(-50%, 4px);
+  padding: 5px 10px; border-radius: 999px;
+  background: rgba(20, 22, 18, 0.82); color: #f4f4f2; opacity: 0; transition: opacity 0.12s, transform 0.12s;
+  font: 500 11px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+.tip:has(kbd) { padding-right: 6px; }
+.tip kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px;
+  box-sizing: border-box; border-radius: 5px; background: rgba(244, 244, 242, 0.22); color: #f4f4f2; font: inherit; font-size: 10px;
+}
+/* up in the corner there is no room over a button: its name goes under it */
+.corner .tip { bottom: auto; top: calc(100% + 12px); transform: translate(-50%, -4px); }
+/* the last of a row keeps its name inside the screen */
+.history .tip { left: auto; right: 0; transform: translate(0, 4px); }
+@media (hover: hover) {
+  .pill button:hover:not(:disabled) .tip { opacity: 1; transform: translate(-50%, 0); transition-delay: 0.35s; }
+  .history button:hover:not(:disabled) .tip { transform: translate(0, 0); }
+}
+@media (max-width: 640px) {
+  /* on a phone the brushes lie along the bottom from the left, and undo and redo keep the right corner */
+  .brushes { left: max(16px, env(safe-area-inset-left)); transform: none; }
+  .history { right: max(16px, env(safe-area-inset-right)); }
+}
+
+/* what the trace found: over the bar */
+.note {
+  position: fixed; z-index: 2; left: 50%; transform: translateX(-50%); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 72px);
+  padding: 7px 12px; border-radius: 999px; background: rgba(20, 22, 18, 0.55); color: #f4f4f2; pointer-events: none;
+  font: 600 10px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.note:empty { display: none; }
+
+@media (max-width: 640px) {
+  /* on a phone the time and the overlays go under the plate, on the right */
+  /* on a phone the time sits top right beside the plate, and the overlays hang under it */
+  .corner { top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); flex-direction: column; align-items: flex-end; }
+  /* there is no room for the figures there: the hands of the clock say it */
+  .corner .time { display: none; }
+}
+/* ?debug: the shot, slider by slider */
+.pane {
+  position: fixed; z-index: 2; top: calc(max(20px, env(safe-area-inset-top)) + 56px); right: max(20px, env(safe-area-inset-right));
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 4px; width: 264px; box-sizing: content-box; max-height: calc(100vh - 194px); max-height: calc(100dvh - 194px); overflow-y: auto; padding: 12px; border-radius: 14px;
+  background: rgba(20, 22, 18, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f4f4f2;
+  font: 600 10px/1 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.pane .gauge { grid-column: 1 / -1; text-align: left; text-transform: none; letter-spacing: 0.02em; font-weight: 500; line-height: 1.4; opacity: 0.85; }
+.pane hr { grid-column: 1 / -1; width: 100%; border: 0; border-top: 1px solid rgba(244, 244, 242, 0.2); margin: 2px 0; }
+.pane label { grid-column: 1 / -1; display: grid; grid-template-columns: 58px 1fr 40px; align-items: center; gap: 8px; }
+.pane label.check { grid-column: auto; display: flex; gap: 8px; padding: 3px 0; cursor: pointer; }
+.pane label.check input { width: auto; margin: 0; }
+.pane input { width: 100%; min-width: 0; accent-color: #f4f4f2; }
+.pane select { grid-column: 2 / -1; font: inherit; color: #1c1c1c; background: #f4f4f2; border: 0; border-radius: 6px; padding: 4px 6px; }
+.pane output { text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.pane button {
+  appearance: none; border: 0; cursor: pointer; padding: 9px 0; margin-top: 4px; border-radius: 999px;
+  background: #f4f4f2; color: #1c1c1c; font: inherit;
+}
+.pane button:nth-of-type(even) { background: rgba(244, 244, 242, 0.16); color: #f4f4f2; }
+/* the watch on the traffic: only there when it has something to say */
+.alarm {
+  position: fixed; z-index: 5; left: 16px; bottom: 90px; margin: 0; max-width: min(520px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
+  padding: 10px 12px; border-radius: 10px; background: rgba(120, 20, 16, 0.92); color: #fff; user-select: text; -webkit-user-select: text;
+  font: 11px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+}
+.alarm:empty { display: none; }
+.clean .corner, .clean .brushes, .clean .history, .clean .save, .clean .note, .clean .pane { display: none; }
+@media (max-width: 640px) {
+  /* the pane sits under the bar on a phone */
+  /* and it stops well over the brushes along the bottom */
+  .pane { top: calc(max(16px, env(safe-area-inset-top)) + 60px); right: max(16px, env(safe-area-inset-right)); max-height: calc(100vh - 194px); max-height: calc(100dvh - 158px - max(16px, env(safe-area-inset-top)) - max(20px, env(safe-area-inset-bottom))); }
+}

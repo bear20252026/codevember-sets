@@ -1,0 +1,462 @@
+import { useEffect, useMemo, useRef } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import { BackSide, FrontSide, Group, Mesh, Quaternion, Raycaster, SphereGeometry, Vector2, Vector3 } from 'three';
+
+const CENTRE = new Vector2(0, 0);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+// Scratch for the per-frame and per-move maths, so nothing is allocated there.
+const _right = new Vector3(), _a = new Vector3(), _b = new Vector3(), _axis = new Vector3(), _inv = new Quaternion();
+// Scratch for the analytic brush hit, reused every frame.
+const _c = new Vector3(), _s = new Vector3(), _oc = new Vector3(), _local = new Vector3(), _q = new Quaternion();
+const _hit = { u: 0, v: 0, point: new Vector3() };
+// Dab spacing as a fraction of the brush size, and the alpha each dab adds, so a stroke builds up smoothly rather
+// than popping in dab by dab: about a dozen dabs overlap at any point of a round stroke.
+const SPACING: Record<Brush, number> = { round: 0.06, bristle: 0.06, spray: 0.05, erase: 0.08, glaze: 0.035, pencil: 0.06 };
+const FLOW: Record<Brush, number> = { round: 0.2, bristle: 0.3, spray: 0.3, erase: 0.12, glaze: 0.08, pencil: 0.25 };
+
+// The wheel, tunable live. A trackball: drag turns the balloon about the axis across the drag, any direction,
+// and it keeps turning once let go at the speed of the last move, slowing only a little. Grabbing never stops it.
+export const wheel = {
+  gain: Math.PI, // radians of turn per window width of drag
+  drag: 0.1,     // how fast the spin dies away once let go, per second: it spins a long while...
+  friction: 0.05, // ...and this steady brake, radians per second per second, brings it to a stop at the end
+  maxSpin: 40,   // radians per second
+  q: new Quaternion(),      // the balloon's orientation
+  omega: new Vector3(),     // angular velocity, world space
+  grabbed: false,
+  time: 0, calm: 1, // the breathing
+};
+import { MeshBasicNodeMaterial, MeshPhysicalNodeMaterial, type WebGPURenderer } from 'three/webgpu';
+import {
+  Fn, If, abs, cos, float, max, min, mix, mx_noise_float, normalMap, positionLocal, reflectVector, sin, smoothstep, normalViewGeometry,
+  equirectUV, positionViewDirection, saturate, select, texture, time, uniform, uv, vec2, vec3,
+} from 'three/tsl';
+import { studioTexture } from './env';
+import { K, PAINT_H, PAINT_W, PaintLayer, sim, type Brush, type Dab } from './paint';
+import { FINISH, hexToRgb, tool } from './tool';
+import { dripSettings, dryPile, maybeSpawn, stepDrips } from './drips';
+import { uRim, uRubber } from './theme';
+import { compose, syncColour } from './color';
+
+export const paint = new PaintLayer();
+// Shift held: the brush erases instead, at its size, until it's let go.
+let erasing = false;
+const shift = (e: KeyboardEvent) => { erasing = e.shiftKey; };
+window.addEventListener('keydown', shift);
+window.addEventListener('keyup', shift);
+window.addEventListener('blur', () => { erasing = false; });
+const brushNow = (): Brush => (erasing ? 'erase' : tool.brush);
+// Dev: 0 normal, 1 coverage, 2 wetness, 3 thickness, 4 tint. And how much wet paint glosses up.
+const uDebug = uniform(0);
+const uWetGloss = uniform(1);
+const uBump = uniform(sim.bump);
+const uGrain = uniform(sim.grain);
+const uEdge = uniform(2.2); // how much pigment gathers at a wash's edge
+if (import.meta.env.DEV) { (window as any).__tool = tool; (window as any).__drips = dripSettings; (window as any).__wheel = wheel; (window as any).__sim = sim; (window as any).__paint = paint; (window as any).__dbg = uDebug; (window as any).__wetGloss = uWetGloss; (window as any).__edge = uEdge; }
+
+// Thin clear rubber with paint on it. Clear rubber has no diffuse of its own, only its reflections and a thin
+// border where it is seen edge on; where there is paint the surface is opaque in the paint's colour and finish, wet paint
+// glossier, and the paint's thickness bumps the normal so runs and ridges catch the light.
+function balloonMaterial(side: typeof FrontSide | typeof BackSide) {
+  const m = new MeshPhysicalNodeMaterial();
+  m.transparent = true;
+  m.depthWrite = false;
+  m.side = side;
+  const c = paint.colorNode;
+  const p = paint.propsNode;
+  // Thick paint covers even where few dabs landed, so runs read as paint and not as a glaze.
+  // Watercolour on the flat, dry washes (the glaze): pigment gathers where the wash ends, so the edge of a stroke,
+  // and the edge of one layer over another, is denser than the middle, which is a little granular.
+  // The ring sits just inside the rim: where the coverage is above the mean of its surroundings, a good way out,
+  // the pigment has dried denser. Wide and soft, like a coffee ring, not a line.
+  // u offsets stretched by 1 / sin(theta), clamped, so the measure is the same distance all over the sphere.
+  // The ring's four coverage reads and the relief's four props reads and four noises are the heavy part of the
+  // shader, which runs twice (front and back). They are skipped where there is no paint, most of a half-painted
+  // balloon: a select would run them all anyway, a branch lets a wave with nothing in it go free. Both come out
+  // nought there in any case. The reads in the branch sample a given level: WGSL refuses a plain sample in
+  // non-uniform flow. Returns (slope.x, slope.y, mean coverage a ring out).
+  const heavy = Fn(() => {
+    const out = vec3(0).toVar();
+    If(c.a.greaterThan(0.001).or(p.x.greaterThan(0.001)), () => {
+      const uScale = min(float(1).div(max(sin(float(1).sub(uv().y).mul(Math.PI)), 0.02)), 8).toVar();
+      const e = vec2(float(26 * K / PAINT_W).mul(uScale), 26 * K / PAINT_H);
+      const around = paint.colorAt(uv().sub(vec2(e.x, 0)), 0).a.add(paint.colorAt(uv().add(vec2(e.x, 0)), 0).a)
+        .add(paint.colorAt(uv().sub(vec2(0, e.y)), 0).a).add(paint.colorAt(uv().add(vec2(0, e.y)), 0).a).mul(0.25);
+      // Normal from the paint's height: thickness plus a fine grain, differenced across one texel each way in the
+      // target. Orange peel on thick paint, ridges along bristle strokes, rounded lips on the runs.
+      // Two texels either way: a step a run leaves is spread over a few texels, not drawn as a line.
+      const px = float(2 * K / PAINT_W).mul(uScale), py = 2 * K / PAINT_H;
+      // Height is the thickness, clamped so a big drop reads as a dome and not a cliff, plus a fine grain.
+      // Compressed smoothly towards 1.5 rather than clamped: a hard cap drew a contour line wherever a run piled
+      // the paint over it.
+      const height = (at: any, props: any) => { const h = props.x.div(props.x.add(1)); return h.add(mx_noise_float(at.mul(vec2(2048 / 3, 1024 / 3))).mul(uGrain).mul(h)); };
+      const hL = height(uv().sub(vec2(px, 0)), paint.propsAt(uv().sub(vec2(px, 0)), 0));
+      const hR = height(uv().add(vec2(px, 0)), paint.propsAt(uv().add(vec2(px, 0)), 0));
+      const hD = height(uv().sub(vec2(0, py)), paint.propsAt(uv().sub(vec2(0, py)), 0));
+      const hU = height(uv().add(vec2(0, py)), paint.propsAt(uv().add(vec2(0, py)), 0));
+      const slope = vec2(hR.sub(hL), hU.sub(hD)).mul(uBump).mul(-0.5);
+      out.assign(vec3(slope, around));
+    });
+    return out;
+  })();
+  const around = heavy.z;
+  // A wash: no thickness, and no roughness at all, which only the glaze lays. Pencil paint and spray are thin too
+  // but carry their finish, so they get none of the watercolour. (Roughness over coverage climbs with the overlap,
+  // since the props target adds roughness up but saturates coverage; nought stays nought.)
+  const wash = float(1).sub(saturate(p.x.mul(4))).mul(float(1).sub(smoothstep(0.02, 0.06, p.z.div(max(c.a, 0.001))))).toVar();
+  const ring = saturate(c.a.sub(around).mul(uEdge)).mul(wash);
+  const washA = c.a.mul(ring.mul(1.3).add(1));
+  const cov = max(saturate(washA), saturate(p.x.mul(2.5))).toVar();
+  const safe = max(c.a, 0.001);
+  const tint = c.rgb.div(safe);
+  const f1 = saturate(float(1).sub(abs(normalViewGeometry.dot(positionViewDirection))));
+  // Only a thin border: the rubber shows edge on and almost nowhere else.
+  const f2 = f1.mul(f1);
+  const fresnel = f2.mul(f2).mul(f2).mul(f1);
+  const wet = p.y;
+  // Dev views: 1..4 flat data, 5 lit diffuse only, 6 no specular, 7 opacity 1.
+  const flat = uDebug.greaterThanEqual(1).and(uDebug.lessThanEqual(4));
+  const dbgView = select(uDebug.equal(1), vec3(cov), select(uDebug.equal(2), vec3(wet), select(uDebug.equal(3), vec3(p.x), tint)));
+  const noSpec = uDebug.equal(5).or(uDebug.equal(6));
+  const opaque = uDebug.equal(5).or(uDebug.equal(7));
+  m.colorNode = select(flat, dbgView, mix(uRubber, tint, cov));
+  m.opacityNode = select(flat.or(opaque), float(1), mix(float(0.008).add(fresnel.mul(0.6)), float(1), cov));
+  const roughPaint = mix(p.z.div(safe), float(0.04), wash).toVar(); // a wash is glass smooth
+  // Wet paint glosses up, but matte less so: it stays dull even wet.
+  const wetGloss = wet.mul(uWetGloss).mul(float(1).sub(smoothstep(0.6, 0.9, roughPaint)));
+  m.roughnessNode = select(flat, float(1), mix(float(0.08), roughPaint.mul(mix(1, 0.3, wetGloss)), cov));
+  m.metalnessNode = select(flat, float(0), p.w.div(safe).mul(cov));
+  // A rough paint also reflects less: matte is matte, not just blurry.
+  m.specularIntensityNode = select(flat.or(noSpec), float(0), mix(float(1), float(0.2), smoothstep(0.6, 0.95, roughPaint).mul(cov)));
+  // Pale rim like a reflection of the room, instead of an environment map.
+  m.emissiveNode = select(flat.or(noSpec), vec3(0), vec3(0.9, 0.88, 0.85).mul(fresnel).mul(uRim).mul(float(1).sub(cov.mul(0.7))));
+  const nTs = vec3(heavy.xy, 1).normalize();
+  m.normalNode = normalMap(nTs.mul(0.5).add(0.5), float(1)) as any;
+  return m;
+}
+
+// The soap film: a thin layer over the clear rubber with what a real bubble shows, the rainbow of light bouncing
+// between the two faces of the film (its colour set by how thick the film is there, which swirls slowly and runs
+// thinner towards the rim) and the room mirrored in it, the window crisp, bars and all. Its own draw with ordinary alpha, because
+// the rubber's own reflections are scaled down to almost nothing by its 0.8% opacity. Gone where there's paint.
+function filmMaterial() {
+  const m = new MeshBasicNodeMaterial();
+  m.transparent = true;
+  m.depthWrite = false;
+  const f1 = saturate(float(1).sub(abs(normalViewGeometry.dot(positionViewDirection))));
+  const swirl = mx_noise_float(positionLocal.mul(1.4).add(vec3(0, time.mul(0.025), 0)));
+  const thick = swirl.mul(0.35).add(0.5).add(f1.mul(0.7)); // in bands: each whole step is one turn of the rainbow
+  const film = mix(cos(thick.mul(Math.PI * 2 * 1.6).add(vec3(0, 2.1, 4.2))).mul(0.5).add(0.5), vec3(1), 0.6); // a hint of colour, mostly pale
+  // The studio in the reflected direction: only its bright parts (the window, the light strip) show on a clear film.
+  const room = texture(studioTexture(), equirectUV(reflectVector)).rgb;
+  const glint = saturate(room.dot(vec3(0.3, 0.59, 0.11)).sub(1.1).mul(0.6));
+  const clear = float(1).sub(saturate(max(paint.colorNode.a, paint.propsNode.x.mul(2.5))));
+  const sheen = f1.mul(f1).mul(0.3).add(0.03);
+  m.colorNode = mix(film, vec3(1), saturate(glint));
+  m.opacityNode = saturate(sheen.add(glint)).mul(clear);
+  return m;
+}
+
+export function Balloon() {
+  const gl = useThree((s) => s.gl) as unknown as WebGPURenderer;
+  const geo = useMemo(() => new SphereGeometry(1, 128, 96), []);
+  const front = useMemo(() => balloonMaterial(FrontSide), []);
+  const back = useMemo(() => balloonMaterial(BackSide), []);
+  const film = useMemo(filmMaterial, []);
+  const stroke = useRef<{ u: number; v: number; seed: number } | null>(null);
+
+  if (import.meta.env.DEV) (window as any).__gl = gl;
+  // Splat this frame's dabs and run the paint before the scene renders.
+  useFrame((_, dt) => {
+    uBump.value = sim.bump; uGrain.value = sim.grain;
+    // Liquid: how runny the paint is. The tongues along a stroke's edge start at less thickness, move faster
+    // and dry slower; the legs are the drips (drips.ts), which form where paint piles up.
+    const l = tool.liquid;
+    // At zero nothing runs at all: the threshold sits above the thickest impasto and the rate is nil.
+    sim.runAt = lerp(1.3, 0.35, l);
+    sim.runNoise = lerp(0.3, 0.4, l);
+    sim.lane = 14;
+    sim.laneSharp = 1;
+    sim.runRate = lerp(0, 0.7, Math.min(1, l * 2.5)) * lerp(0.3, 1, l);
+    sim.dry = lerp(0.002, 0.00015, l);
+    sim.spread = lerp(0.06, 0.12, l);
+    sim.bleed = 0.03 + tool.watery * 0.14;
+    dryPile(dt);
+    stepDrips(dt, sim.gravityObj, tool.size, l, paint);
+    paint.flush(gl, dt);
+  }, -1);
+
+  // Each touch varies the brush a little, like a real one never takes paint the same way twice: size, load, how
+  // runny, and a hair of hue and brightness. Drawn once per stroke as offsets on the knobs, which keep their values;
+  // the colour is remade when the knobs move, so a long auto-draw stroke still follows them.
+  const jitter = useRef({ size: 1, flow: 1, liquid: 0, dh: 0, ds: 0, key: '', rgb: hexToRgb(tool.hex) });
+  const rollJitter = () => {
+    const r = (a: number) => (Math.random() * 2 - 1) * a;
+    jitter.current = { ...jitter.current, size: 1 + r(0.15), flow: 0.975 + r(0.125), liquid: r(0.08), dh: r(0.012), ds: r(0.04), key: '' };
+  };
+  const dabAt = (u: number, v: number, angle: number, seed: number, grow = 1) => {
+    const j = jitter.current;
+    syncColour(); // a hex set elsewhere (a preset) brings hue and shade along first
+    const key = `${tool.hue} ${tool.shade}`;
+    if (j.key !== key) {
+      j.rgb = hexToRgb(compose(((tool.hue + j.dh) % 1 + 1) % 1, Math.min(1, Math.max(0, tool.shade + j.ds))));
+      j.key = key;
+    }
+    const finish = FINISH[tool.finish];
+    const glaze = brushNow() === 'glaze';
+    const w = tool.watery;
+    const d: Dab = {
+      u, v, angle, seed,
+      // Watery glaze: wider, thinner. Its softness rides in the rough slot, which the glaze doesn't use.
+      // The spray dab is drawn a little bigger than the brush: the dense core fills the ring, the speckles go just outside.
+      size: tool.size * (glaze ? 1 + w * 0.7 : brushNow() === 'spray' ? 1.2 : 1) * grow * j.size,
+      rgb: j.rgb,
+      // Dabs overlap many times along the stroke, so each one carries only a little.
+      flow: FLOW[brushNow()] * tool.flow * (glaze ? 1 - w * 0.45 : 1) * j.flow,
+      brush: brushNow(),
+      rough: glaze ? w : finish.rough,
+      metal: finish.metal,
+      wet: glaze ? 1 : brushNow() === 'spray' || brushNow() === 'pencil' ? 0 : undefined, // a wash is laid wet and floats out; spray and pencil are dry
+    };
+    paint.add(d);
+    if (brushNow() !== 'erase') maybeSpawn(d, Math.min(1, Math.max(0, tool.liquid + j.liquid)), sim.gravityObj, grow > 1); // grow > 1: the can held still
+    // Spray splatters: now and then a fat drop lands off to the side, outside the mist.
+    if (brushNow() === 'spray' && Math.random() < 0.12) {
+      const n = 1 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) {
+        // Small dots, the same size whatever the brush, just outside the mist.
+        const reach = Math.min(tool.size, 0.06);
+        const r = reach * (0.5 + Math.random() * 0.4), t = Math.random() * Math.PI * 2;
+        const circ = 2 * Math.max(Math.sin(v * Math.PI), 0.05);
+        paint.add({
+          ...d, brush: 'round', seed: Math.random() * 1000, angle: 0,
+          u: ((u + Math.cos(t) * r / circ) % 1 + 1) % 1, v: Math.min(0.999, Math.max(0.001, v + Math.sin(t) * r)),
+          size: 0.0015 + Math.random() ** 2 * 0.003, flow: 0.7 + Math.random() * 0.3, load: 0, wet: 0, // tiny flat dots
+        });
+      }
+    }
+  };
+  // Spray keeps coming while the can is held still: a dab every so often at the same spot, so it builds up.
+  const sprayHold = useRef(0), sprayHeld = useRef(0);
+
+  // The brush sits at the centre of the screen: turning the balloon under it is the stroke. The left button
+  // paints while it orbits, the right button only orbits. Each frame the centre ray is cast at the balloon and the
+  // hit's uv is fed to the stroke, dabs laid at the brush's spacing along the way.
+  const frontRef = useRef<Mesh>(null);
+  const painting = useRef(false);
+  const raycaster = useMemo(() => new Raycaster(), []);
+  const camera = useThree((s) => s.camera);
+
+  // Where the screen centre meets the balloon. It's a perfect sphere, so the ray is met analytically instead of
+  // tested against its 24k triangles: the near root of |o + t d - c| = r, then the hit turned back into the
+  // balloon's own frame and read as SphereGeometry lays its uvs (u = atan2(z, -x) / 2pi, v = 1 - acos(y) / pi).
+  const hit = () => {
+    const mesh = frontRef.current;
+    if (!mesh) return null;
+    raycaster.setFromCamera(CENTRE, camera);
+    const { origin, direction } = raycaster.ray;
+    mesh.getWorldPosition(_c);
+    const r = mesh.getWorldScale(_s).x;
+    _oc.subVectors(origin, _c);
+    const b = _oc.dot(direction), disc = b * b - (_oc.lengthSq() - r * r);
+    if (disc < 0) return null;
+    const t = -b - Math.sqrt(disc);
+    if (t < 0) return null;
+    _hit.point.copy(origin).addScaledVector(direction, t);
+    _local.subVectors(_hit.point, _c).divideScalar(r).applyQuaternion(mesh.getWorldQuaternion(_q).invert());
+    _hit.u = ((Math.atan2(_local.z, -_local.x) / (2 * Math.PI)) % 1 + 1) % 1;
+    _hit.v = 1 - Math.acos(Math.min(1, Math.max(-1, _local.y))) / Math.PI;
+    return _hit;
+  };
+
+  // Spray thins with speed, like a real can: full width dawdling, down to a quarter on a quick flick. Smoothed.
+  const sprayWidth = useRef(1);
+  const advance = (u: number, v: number, dt = 1 / 120) => {
+    const s = stroke.current;
+    if (!s) return;
+    let du = u - s.u;
+    if (du > 0.5) du -= 1; else if (du < -0.5) du += 1; // shortest way round the seam
+    const dv = v - s.v;
+    // Distance in v units: a u step is worth the circumference at this latitude.
+    const circ = 2 * Math.max(Math.sin(s.v * Math.PI), 0.02);
+    const dist = Math.hypot(du * circ, dv);
+    const spacing = tool.size * SPACING[brushNow()];
+    if (brushNow() === 'spray') {
+      const speed = dist / Math.max(dt, 1e-3); // pole-to-pole units a second
+      const want = 1 - 0.75 * Math.min(1, Math.max(0, (speed - 0.15) / 1.0));
+      sprayWidth.current += (want - sprayWidth.current) * Math.min(1, dt * 12);
+    } else sprayWidth.current = 1;
+    if (dist < spacing) return;
+    sprayHeld.current = 0; // moving again
+    const angle = Math.atan2(dv, du * circ);
+    const n = Math.floor(dist / spacing);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      // Spray speckles differ per dab; the other brushes keep the stroke's seed so their furrows run on.
+      dabAt(((s.u + du * t) % 1 + 1) % 1, s.v + dv * t, angle, brushNow() === 'spray' ? s.seed + i : s.seed, sprayWidth.current);
+    }
+    const t = n / (dist / spacing);
+    s.u = ((s.u + du * t) % 1 + 1) % 1;
+    s.v += dv * t;
+  };
+
+  useEffect(() => {
+    const el = gl.domElement;
+    // Grabbing never stops it: held still, the balloon keeps turning under the hand. Moved, it follows the hand
+    // (a window width is half a turn, about the axis across the drag) and on release spins on at the speed of the
+    // last move.
+    // Every finger (or the mouse) down on the balloon, at its last place. Two or more fingers turn it without
+    // painting; the turn follows their centre, each finger moving it a share.
+    let lastT = 0;
+    const hand = new Vector3(), axis = new Vector3(), dq = new Quaternion();
+    const fingers = new Map<number, { x: number; y: number }>();
+    const move = (e: PointerEvent) => {
+      const f = fingers.get(e.pointerId);
+      if (!wheel.grabbed || !f) return;
+      const mx = e.clientX - f.x, my = e.clientY - f.y;
+      if (Math.abs(mx) + Math.abs(my) < 2) return; // a twitch, not a move
+      f.x = e.clientX; f.y = e.clientY;
+      const g = wheel.gain / Math.min(window.innerWidth, window.innerHeight) / fingers.size;
+      axis.set(my * g, mx * g, 0); // right drag turns about y, down drag about x
+      const angle = axis.length();
+      if (angle > 0) {
+        dq.setFromAxisAngle(_axis.copy(axis).divideScalar(angle), angle);
+        wheel.q.premultiply(dq);
+      }
+      const t = e.timeStamp, dt = Math.max((t - lastT) / 1000, 1 / 240);
+      // The hand's speed, from this step and the one before so a single odd event timing doesn't throw it.
+      hand.multiplyScalar(0.5).addScaledVector(axis, 0.5 / dt);
+      // Once the hand moves, the balloon is the hand's: the old spin fades out under it.
+      wheel.omega.multiplyScalar(0.7);
+      lastT = t;
+    };
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (fingers.size > 1) { painting.current = false; stroke.current = null; return; } // a second finger: just turn
+      painting.current = !(e.metaKey || e.ctrlKey); // cmd (ctrl off a Mac): turn it without painting
+      wheel.grabbed = true;
+      el.classList.add('grabbing');
+      hand.set(0, 0, 0);
+      lastT = e.timeStamp;
+    };
+    const up = (e: PointerEvent) => {
+      if (!fingers.delete(e.pointerId)) return; // not one of ours
+      painting.current = false; // lifting one of two fingers doesn't start painting again
+      stroke.current = null;
+      if (fingers.size > 0) return; // still held by the other finger
+      el.classList.remove('grabbing');
+      if (!wheel.grabbed) return;
+      wheel.grabbed = false;
+      // Let go while moving: it spins on at the hand's speed. Let go after a pause: it stays as it is.
+      if (!tool.inertia) {
+        wheel.omega.set(0, 0, 0); // no inertia: it stops where the hand lets go
+      } else if (e.timeStamp - lastT < 80 && hand.lengthSq() > 0) {
+        wheel.omega.copy(hand);
+        if (wheel.omega.length() > wheel.maxSpin) wheel.omega.setLength(wheel.maxSpin);
+      }
+    };
+    el.addEventListener('pointerdown', down);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      el.removeEventListener('pointerdown', down);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [gl]);
+
+  const ring = useRef<HTMLElement | null>(null), ringLast = useRef({ d: -1, o: '' });
+  // Paint under the brush where the camera is now, and size the ring on screen.
+  useFrame(({ size }, dt) => {
+    const h = hit();
+    ring.current ??= document.getElementById('reticle');
+    if (ring.current) {
+      // The brush diameter is in v units, pole to pole is pi r: project a point one radius to the side.
+      let px = 0;
+      if (h) {
+        const r = tool.size * Math.PI * 0.5;
+        _right.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(r);
+        _a.copy(h.point).project(camera); _b.copy(h.point).add(_right).project(camera);
+        px = Math.abs(_b.x - _a.x) * size.width * 0.5;
+      }
+      // Restyle only when the ring actually changes size or state.
+      const d = Math.round(Math.max(px * 2, 12)), o = h ? '1' : '0.3';
+      ring.current.classList.toggle('erasing', erasing);
+      if (d !== ringLast.current.d || o !== ringLast.current.o) {
+        ring.current.style.width = ring.current.style.height = `${d}px`;
+        ring.current.style.opacity = o;
+        ringLast.current = { d, o };
+      }
+    }
+    // The turntable only paints while the balloon turns: standing (near) still, the brush would pile on one spot.
+    const turning = wheel.grabbed || wheel.omega.length() > 0.15;
+    if (!(painting.current || (tool.auto && turning)) || !h) { stroke.current = null; return; }
+    if (!stroke.current) {
+      const seed = Math.random() * 1000;
+      stroke.current = { u: h.u, v: h.v, seed };
+      rollJitter();
+      sprayHeld.current = 0;
+      dabAt(h.u, h.v, 0, seed);
+    } else {
+      advance(h.u, h.v, dt);
+      if (brushNow() === 'spray') {
+        // Held still (not just moving slowly): the can keeps spraying and the cloud widens, up to twice the
+        // brush after a couple of seconds. Moving, the stroke is the same at any speed.
+        const s = stroke.current;
+        let du = h.u - s.u; if (du > 0.5) du -= 1; else if (du < -0.5) du += 1;
+        const moved = Math.hypot(du * 2 * Math.max(Math.sin(s.v * Math.PI), 0.02), h.v - s.v);
+        if (moved < tool.size * SPACING.spray * 0.5) {
+          sprayHeld.current += dt;
+          sprayHold.current += dt;
+          if (sprayHeld.current > 0.15 && sprayHold.current > 0.05) {
+            sprayHold.current = 0;
+            dabAt(h.u, h.v, 0, s.seed + Math.random() * 97, 1 + Math.min(sprayHeld.current, 2.5) * 0.4);
+          }
+        } else sprayHeld.current = 0;
+      }
+    }
+  }, -2); // before the flush; a positive priority would turn off R3F's own render
+
+  // Spin on, once let go, with hardly any drag.
+  const groupRef = useRef<Group>(null);
+  const step = useMemo(() => new Quaternion(), []);
+  useFrame((_, dt) => {
+    const g = groupRef.current;
+    if (!g) return;
+    if (!wheel.grabbed) {
+      wheel.omega.multiplyScalar(Math.exp(-dt * wheel.drag));
+      const w0 = wheel.omega.length();
+      wheel.omega.setLength(Math.max(0, w0 - wheel.friction * dt)); // a zero-length vector stays zero
+    }
+    const w = wheel.omega.length();
+    if (w > 0) {
+      step.setFromAxisAngle(_axis.copy(wheel.omega).divideScalar(w), w * dt);
+      wheel.q.premultiply(step);
+    }
+    g.quaternion.copy(wheel.q);
+    // Attract mode: left still, it breathes, a slow swell, a slower bob and a lazy sway, a couple of percent. It
+    // eases in over a few seconds once nothing moves and drops out quickly when it's held or spun, so in use the
+    // balloon keeps its shape and its place.
+    wheel.time += dt;
+    const calmWant = wheel.grabbed || wheel.omega.length() > 0.05 ? 0 : 1;
+    wheel.calm += (calmWant - wheel.calm) * Math.min(1, dt * (calmWant > wheel.calm ? 0.6 : 6));
+    const breath = Math.sin(wheel.time * (2 * Math.PI / 4.5)) * 0.018 * wheel.calm;
+    const bob = Math.sin(wheel.time * (2 * Math.PI / 7)) * 0.03 * wheel.calm;
+    const sway = Math.sin(wheel.time * (2 * Math.PI / 11) + 1.3) * 0.015 * wheel.calm;
+    g.position.set(sway, bob, 0);
+    g.scale.setScalar(1 + breath); // always a perfect sphere, it only swells
+    // The room's down, in the balloon's frame, for the runs.
+    sim.gravityObj.set(0, -1, 0).applyQuaternion(_inv.copy(g.quaternion).invert());
+  }, -3);
+
+  return (
+    <group ref={groupRef}>
+      <mesh geometry={geo} material={back} renderOrder={0} />
+      <mesh ref={frontRef} geometry={geo} material={front} renderOrder={1} />
+      <mesh geometry={geo} material={film} renderOrder={2} scale={1.002} />
+    </group>
+  );
+}
