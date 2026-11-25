@@ -14,7 +14,7 @@ A parallel repository to [`nodevember`](https://github.com/bear20252026/nodevemb
 - `spite/` — the full upstream source tree: 25 day folders, shared modules, assets, screenshots and the gallery.
 - `theo/` — the full upstream source tree: 16 day folders, the shared build scripts, template, docs and assets. The build is run in CI; `dist/` and `node_modules/` are not committed.
 - `index.html` — a small landing page for the two sets.
-- `.github/workflows/pages.yml` — builds Theo with the repo subpath and publishes `spite/` + `theo/dist/` together.
+- `docs/` — the built site that GitHub Pages serves from `main / docs`: landing page, `spite/` and `theo/`.
 
 ## Build Theo locally
 
@@ -25,6 +25,10 @@ THEO_BASE_PREFIX=/codevember-sets/theo corepack pnpm build
 ```
 
 `THEO_BASE_PREFIX` is the one build-time change from upstream: Theo's original base is `/codevember-2026/`, which would point outside this repo. The default remains upstream when the variable is unset.
+
+## Publishing
+
+GitHub Pages is set to `main / docs`. `docs/` is the assembled site: `index.html`, `assets/`, `spite/` and Theo's `dist/`. Rebuild Theo, then copy `theo/dist` into `docs/theo` and refresh the landing page/assets when they change.
 
 ## What is not here
 
