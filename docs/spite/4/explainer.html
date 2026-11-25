@@ -1,0 +1,1333 @@
+<!doctype html><html><head><meta charset=utf8><script src="../modules/theme.js"></script><script src="../modules/page.js"></script><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>How Tangle Ties</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One reading column on Tangle's studio grey; figures sit on their own panels, accents from the thin film. */
+:root {
+  --bg: #dcdad6;
+  --panel: #e9e7e3;
+  --ink: #18171c;
+  --muted: #55525a;
+  --line: #bab6b0;
+  --accent: #3f22a8;
+  --magenta: #a0166a;
+  --cyan: #0a6475;
+  --ground: #cfccc7;
+  --env: #f1efeb;
+  --band-1: #3f22a8;
+  --band-2: #7a36c9;
+  --band-3: #b2307f;
+  --band-4: #16809b;
+  --band-5: #2f55c8;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101013; --panel: #1b1b20; --ink: #ecebe7; --muted: #a3a0a8; --line: #36353c;
+    --accent: #a99bff; --magenta: #f27ac0; --cyan: #5fd3e3; --ground: #26262c; --env: #2c2c33;
+    --band-1: #8f7dff; --band-2: #b98af5; --band-3: #ee77bd; --band-4: #4ec3d8; --band-5: #7b9cff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101013; --panel: #1b1b20; --ink: #ecebe7; --muted: #a3a0a8; --line: #36353c;
+  --accent: #a99bff; --magenta: #f27ac0; --cyan: #5fd3e3; --ground: #26262c; --env: #2c2c33;
+  --band-1: #8f7dff; --band-2: #b98af5; --band-3: #ee77bd; --band-4: #4ec3d8; --band-5: #7b9cff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--body); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .holo { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .holo {
+    background: linear-gradient(100deg, var(--accent) 10%, var(--magenta) 55%, var(--cyan) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; }
+.hero figcaption, .still figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+.still { margin: 0; }
+.still img { display: block; width: 100%; height: auto; border-radius: 2px; }
+
+/* Figures */
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; }
+.scroll { overflow-x: auto; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+select {
+  font: 400 13px/1.2 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 6px 8px;
+}
+button {
+  font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px;
+  padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.2 var(--mono); color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .ring { display: inline-block; width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: currentColor; vertical-align: middle; margin-right: 6px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+
+/* Frame order */
+.order { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.order-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.order-col h3 { font-size: 15px; }
+.pass { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 3px; background: var(--bg); font: 400 13px/1.3 var(--mono); }
+.pass small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.chip { font: 600 10.5px/1 var(--mono); padding: 4px 6px; border-radius: 2px; background: var(--accent); color: var(--bg); letter-spacing: 0.04em; white-space: nowrap; }
+.chip.read { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.pass.own { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+/* Table */
+table { border-collapse: collapse; width: 100%; font: 400 13.5px/1.35 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+td b { color: var(--accent); }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.fact.warn { box-shadow: inset 3px 0 0 var(--magenta); }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: nowrap; }
+.formula .c { color: var(--muted); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .two, .order { grid-template-columns: minmax(0, 1fr); }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+  th, td { padding: 8px 7px; font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 4</b> · Tangle</div>
+      <h1>How Tangle <span class="holo">ties</span></h1>
+      <p class="lede">Two to five flat bands wind around a central hole as one coil, twisting around each other. The coil writhes, and every few seconds it re-ties itself into a different knot while the finish fades to a new colour. Here is how the shape, the motion, the reflections and the colour are made.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="explainer/hero.jpg" width="1080" height="1080" alt="A coil of twisted iridescent bands in blue, purple and pink chrome, floating in a grey studio." fetchpriority="high" decoding="async">
+      <figcaption>Holographic chrome, from the live page.</figcaption>
+    </figure>
+  </header>
+
+  <!-- The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>Bands that tie themselves in knots</h2>
+      <p>Day 4's prompt was Tangle. Two to five flat, iridescent bands lie side by side and wind together around a central hole, twisting round each other as they go. The coil writhes slowly, and every few seconds it re-ties itself into a new knot, the bands sliding from one shape into the next.</p>
+      <p>The finish is holographic chrome, a pearl coat or tinted glass, in three palettes, and the band's section can be a squircle, pinched, fluted or a lens.</p>
+      <p>The bands follow one torus-knot path with a wobble. Their surface is a smooth union of swept bands: a mesh is projected onto it on the GPU every frame and its normals are recomputed per pixel, so merged bands blend into soft fillets. The bands reflect each other through a coarse distance volume, the colours come from thin-film optics, and the <a href="../modules/pipeline/explainer.html">shared pipeline</a> adds depth of field.</p>
+    </div>
+  </section>
+
+  <!-- 1. The coil -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The coil · <b>knots.js</b></div>
+      <h2>One path, shared by every band</h2>
+      <p>Every coil starts as a single closed path, a (p, q) torus knot. As the path angle φ goes once around, the path winds p times around the central hole and q times around the tube of the torus, so a coil with p = 2 goes around the hole twice before it closes. Its radius and height wobble with slow sine waves, so the turns are never perfect circles.</p>
+      <p>The bands don't get a knot each. They lie side by side, wide faces together, on that one path. At each of 128 samples the code builds a frame: N points away from the hole's axis, square to the path, and B completes it. The bundle is turned about the path by a twist angle <code>k·φ</code> plus a phase and a wobble, which gives two axes: S, along which the bands stack, and W, across their width. Because k is a whole number, the twist closes on itself after one loop.</p>
+      <p>Each band then moves on its own. The gap to its neighbour breathes, the band slides across its width, tilts about the path and swells. Each of these is a wave along the path, <code>amp · sin(k·φ + phase + t·speed)</code>, with its own small k and a speed of 0.12 to 0.3 radians per second. Time only moves the phases, so the coil writhes without changing its knot. Where a band's offset would carry it past the centre of a tight bend, a tanh eases it back out, so its centreline never turns back on itself.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The coil, from the sketch's formulas</h3>
+        <div class="controls">
+          <label for="coilP">p <input id="coilP" type="range" min="1" max="3" step="1" value="2"><output id="coilPOut" for="coilP">2</output></label>
+          <label for="coilQ">q <input id="coilQ" type="range" min="1" max="2" step="1" value="1"><output id="coilQOut" for="coilQ">1</output></label>
+          <label for="coilN">Bands <input id="coilN" type="range" min="2" max="5" step="1" value="4"><output id="coilNOut" for="coilN">4</output></label>
+          <label for="coilK">Twist <input id="coilK" type="range" min="1" max="5" step="1" value="2"><output id="coilKOut" for="coilK">2</output></label>
+          <button id="coilPlay" type="button" class="ghost">Pause</button>
+        </div>
+      </div>
+      <canvas id="coilCanvas" aria-label="A slowly turning 3D drawing of the coil: several flat bands stacked on one torus-knot path, twisting around each other."></canvas>
+      <p class="fig-cap">Every band is drawn as a flat ribbon of its own width, from the same path, frame and wave formulas the sketch runs, with each random range drawn from a fixed seed. The real bands have a rounded section. The sketch picks p from {1, 2, 2, 2, 3}, keeps q at 1 except for some three-turn coils, and sets the twist within one of p (at least 1).</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>Proportions</b><span>Before the coil is scaled, the base half-thickness b is 0.08 for two bands and about 0.049 for five (capped at 0.085). The half-width is 2.7 to 3.3 times b, so a band is about three times wider than it is thick, and each band varies both a little.</span></div>
+      <div class="fact"><b>Clearance</b><span>For p turns, the torus tube's radius comes from the bundle's half-size over sin(π/p), so neighbouring turns pass each other. Every coil is then scaled to an outer radius of 1.15.</span></div>
+      <div class="fact"><b>No scrunchies</b><span>A coil whose band corners would stretch less than 0.2 along the path somewhere folds over itself. It is redrawn, up to 8 times.</span></div>
+      <div class="fact"><b>To the GPU</b><span>The 128 samples per band go into a 128 × 10 float texture: centre and half-width in the first five rows, width axis and half-thickness in the next five.</span></div>
+    </div>
+  </section>
+
+  <!-- 2. The section -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The section · <b>tangle.js</b></div>
+      <h2>A rounded rectangle, with relief</h2>
+      <p>A band's cross-section is a rectangle with its corners rounded to 0.8 of the half-thickness. At three times as wide as it is thick, that reads as a flat squircle. The other three shapes add a relief on top of it, weighted by one <code>vec3</code> uniform, so they can mix. Changing shape is a smoothstep between two sets of three weights over one second, and the bands morph with it, even while paused.</p>
+      <p><strong>Pinched</strong> pulls the middle of each wide face in by up to 0.45 of the half-thickness, with a <code>(1 − u²)²</code> profile, and pushes the corners out by up to 0.18 at 45°. <strong>Fluted</strong> cuts <code>sin²</code> grooves into each face, three per face, 0.1 of the half-thickness deep. <strong>Lens</strong> thins the band toward its edges by half the half-thickness, which also shrinks the corner arcs.</p>
+      <p>The shader keeps two views of the same shape. <code>outline(f)</code> gives the point and normal at a fraction f of the way around, for placing mesh vertices; it spends twice the vertex density on the corners, where the surface turns fastest. <code>section(q)</code> gives the signed distance and its gradient at any point q, for the projection and the reflections. A point off the outline takes the relief of its nearest point on the plain rectangle.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>One band in cross-section</h3>
+        <div class="controls">
+          <label for="secShape">Section <select id="secShape"><option value="0">squircle</option><option value="1" selected>pinched</option><option value="2">fluted</option><option value="3">lens</option></select></label>
+          <label for="secAmt">Amount <input id="secAmt" type="range" min="0" max="1" step="0.01" value="0.7"><output id="secAmtOut" for="secAmt">0.70</output></label>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="secCanvas" aria-label="The band's cross-section outline with its mesh vertices and faint distance contours, for the chosen section shape."></canvas></div>
+      <div class="legend"><span style="color:var(--accent)"><i></i>outline()</span><span style="color:var(--accent)"><span class="dot"></span>one ring's 36 vertices</span><span style="color:var(--accent)"><span class="ring"></span>the next ring's</span><span style="color:var(--muted)"><i style="border-top-style:dashed"></i>plain rounded rectangle</span></div>
+      <p class="fig-cap">Drawn at a half-width of three half-thicknesses. Odd rings are turned half a side, so the quads become a triangle lattice. The faint lines are <code>section()</code>'s distance contours, 0.1 half-thickness apart, so the outline and the field can be checked against each other.</p>
+    </div>
+  </section>
+
+  <!-- 3. Merge -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The merge · <b>smin</b></div>
+      <h2>Bands melt together through a smooth minimum</h2>
+      <p>The coil's surface is where a distance field crosses zero: the union of every band's distance. A plain minimum leaves a sharp crease where two bands touch. Tangle uses the polynomial smooth minimum instead. Where two distances a and b are within k of each other, it subtracts <code>h²·k / 4</code> from the smaller, with <code>h = 1 − |a − b| / k</code>. The surface swells into a fillet across the gap, and further away the field is untouched.</p>
+      <p>The Merge slider runs from 0 to 0.3, and k is 0.4 of it, because the bands are thin. At the default of 0.12, k is 0.048, about three quarters of a typical half-thickness. The value eases toward the slider with a time constant of a third of a second, so a randomise never snaps the shape.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Three bands, side by side</h3>
+        <div class="controls">
+          <label for="mergeK">Merge <input id="mergeK" type="range" min="0" max="0.3" step="0.005" value="0.12"><output id="mergeKOut" for="mergeK">0.120</output></label>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="mergeCanvas" aria-label="The distance field of three stacked band sections with contour lines; the surface line forms fillets between the bands as Merge grows."></canvas></div>
+      <div class="readout"><span>k <b id="mergeKk">0.048</b></span><span>k / half-thickness <b id="mergeKr">0.76</b></span><span>gaps <b id="mergeGap">0.027</b></span></div>
+      <p class="fig-cap">Cross-section of a three-band, two-turn coil with every random range at its middle, at its actual size: half-thickness 0.064, half-width 0.19, gaps 0.027, with small slides across the width. Contours are 0.01 apart; the bold line is the surface. The field is the shader's <code>smin(smin(d₁, d₂, k), d₃, k)</code>.</p>
+    </div>
+  </section>
+
+  <!-- 4. Field to mesh -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The surface · <b>tangle.js</b></div>
+      <h2>A mesh pulled onto the field every frame</h2>
+      <p>The usual way to draw a distance field is to raymarch it: step each pixel's ray forward by the distance until it lands on the surface. Here that would be slow: every step has to search each band's samples for the nearest point, and a pixel needs many steps.</p>
+      <p>So the coil is an ordinary mesh. Each band is a tube of 256 rings by 36 sides, and on every frame where the coil has changed, a GPU pass with one pixel per vertex puts every vertex on the field. A vertex starts on its band's own section at its ring, where the swept surface's position and normal are known exactly, including how the frame twists and the section changes along the band. A vertex with no other band within reach keeps that position and never evaluates the field; with Merge at 0, every vertex takes this path. The others take three Newton steps, <code>p ← p − f·∇f / |∇f|²</code>, with the factor <code>f / |∇f|²</code> clamped to ±0.1, onto the merged field.</p>
+      <p>The field there is the vertex's own band, swollen toward its neighbours by the smooth minimum but never replaced by them. Where the other band is nearer, the blend carries on with a tanh that levels off. A vertex next to a fillet slides into it and never jumps onto the other band's surface. Every band is drawn closed, and the depth test takes the union.</p>
+      <p>Between samples, a band's centreline is a chain of quadratic Bézier pieces from midpoint to midpoint, and the nearest point on each piece is solved in closed form. To keep the search short, each band is cut into 16 chunks of 8 samples with bounding spheres. Before the Newton steps, capsules around each segment mark the ones within reach in a 128-bit mask.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Vertices stepping onto the merged surface</h3>
+        <div class="controls">
+          <label for="newtonK">Merge <input id="newtonK" type="range" min="0" max="0.3" step="0.005" value="0.2"><output id="newtonKOut" for="newtonK">0.200</output></label>
+          <button id="newtonStep" type="button">Step 1 of 3</button>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="newtonCanvas" aria-label="Two band sections in cross-section. Vertices on the lower band's outline step toward the fillet between the bands; vertices far from the upper band stay where they are."></canvas></div>
+      <div class="legend"><span style="color:var(--accent)"><span class="dot"></span>vertex after the steps so far</span><span style="color:var(--accent)"><span class="ring"></span>start, on its own band</span><span style="color:var(--muted)"><span class="dot"></span>no neighbour in reach: stays</span><span style="color:var(--ink)"><i></i>merged surface</span></div>
+      <p class="fig-cap">A cross-section through two bands. Vertices of the lower band test the upper one with the shader's capsule bound, reach = 1.75 k + 0.02. Those within reach run the shader's swollen field and Newton step; each press runs one more of the three.</p>
+    </div>
+    <div class="col prose">
+      <p>A mesh shows its facets in a mirror finish, so the colour pass recomputes the normal per pixel from the same field, for the front-most fragment only (tested against the prepass depth). The ring and side angles reach the fragment as cosines and sines, which interpolate across the seam, and give the band parameter. Each vertex also stores the ids of the two nearest other bands, so the pixel can redo the same smooth union. So the faces stay smooth at any distance.</p>
+      <p>The projection only runs when something changed: the time, the blend, a re-tie or the section. A paused coil costs none. Last frame's positions stay in a second texture and give the prepass its velocity.</p>
+    </div>
+  </section>
+
+  <!-- 5. Frames -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The frame · <b>knots.js</b></div>
+      <h2>Frames that never flip</h2>
+      <p>A flat band needs an axis across its width at every sample, and each sample's axis has to agree with its neighbours'. An axis picked at each sample on its own, such as the direction the path bends toward, flips by 180° wherever the bend changes side. A round tube would hide that. A flat band shows it as a sudden snap of the section.</p>
+      <p>In a settled coil the axis comes from the hole: N points away from the hole's axis, square to the path, and the twist angle turns it. That is defined all along a torus knot, so it can't flip.</p>
+      <p>Re-tying is harder, because the old and new coils have different frames and twists. Blending the two axes directly would pass through zero and snap wherever they disagree. So during a re-tie the axis is set once, at a starting sample opposite the place where the morph is most strained, and then carried along the drawn centreline. Each step turns it by the least rotation that takes one tangent to the next, then adds the blend of the old and new bands' own twist over that step. No step involves a choice of sign, so neighbouring samples and consecutive frames always agree.</p>
+      <p>Once around the band, the carried axis rarely meets where it started. Early in the morph the mismatch is spread evenly along the band. Mid-blend it gathers into one step at the strained sample, where the band narrows to its thickness over four samples on each side, so the step has nothing to show. The section is symmetric, so a new band whose axis lies more than a quarter turn from the old one is simply used reversed.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>A ribbon, two ways of choosing its axis</h3>
+        <div class="controls">
+          <button id="frameMode" type="button" class="ghost" aria-pressed="false">Axis: per sample</button>
+          <span id="frameSnaps">snaps: 0</span>
+        </div>
+      </div>
+      <canvas id="frameCanvas" aria-label="A ribbon following a wavy curve. With the per-sample axis it flips over abruptly where the bend changes side; with the carried axis it stays smooth."></canvas>
+      <div class="legend"><span style="color:var(--accent)"><span class="sw"></span>face toward you</span><span style="color:var(--magenta)"><span class="sw"></span>face away</span><span style="color:var(--ink)"><span class="ring"></span>snap</span></div>
+      <p class="fig-cap">The per-sample axis follows the bend, so it flips at every point where the bend changes side, and those points travel as the curve moves. The carried axis is moved from each sample to the next by the least rotation between their tangents, the same <code>carry()</code> the re-tie uses.</p>
+    </div>
+  </section>
+
+  <!-- 6. Re-tie -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The re-tie · <b>knots.js</b></div>
+      <h2>Matching one knot to the next</h2>
+      <p>Every 10 seconds by default (Auto change), or on T, a new random coil is drawn and the old one morphs into it over 2 seconds with a smoothstep ease. Blending sample j of the old coil with sample j of the new one would fail. A two-turn coil and a three-turn coil reach different places around the hole at the same path angle, so the blend would cut straight across the hole.</p>
+      <p>So the old coil is matched to the new one first. It is spun about its hole axis by the angle that brings the two rotations closest. Then each new sample gets an old path angle: the same position around the hole, except over one span, where the turn one coil has more than the other grows or shrinks away. The span's start and the phase are found by brute force, scoring the summed squared distance over 128 phases, and 16 starts when the turn counts differ. When both coils have the same number of bands, they pair up in order or in reverse, whichever lies closer. Bands only the new coil has grow from zero width.</p>
+      <p>The blended centreline isn't a blend of positions either. It is rebuilt from blended directions. Each step turns from the old direction to the new one with the blended length, and rises along the hole's axis where the two disagree. The gap left once around is taken off every step in proportion. A blend of positions can double back where a turn shrinks away, and a blend of directions can't.</p>
+      <p>A few guards keep the morph clean. The coil's RMS radius is interpolated so its size doesn't dip, and its rotation is slerped. Wherever the blended centreline bends tighter than a band can follow (its half-width beyond 0.7 of the radius of curvature), the band narrows and thins. On T or the Re-tie button, the new coil's twist may change by whole turns, never past what it had, so the bands' windings match and nothing has to tear. Pressing R or T mid-morph doesn't jump: the running morph hurries to its end in 0.4 s, then the new one starts from what is on screen.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Two turns becoming three</h3>
+        <div class="controls">
+          <label for="retieNew">New coil <select id="retieNew"><option value="3" selected>3 turns</option><option value="1">1 turn</option></select></label>
+          <label for="retieT">Blend <input id="retieT" type="range" min="0" max="1" step="0.005" value="0.5"><output id="retieTOut" for="retieT">0.50</output></label>
+          <button id="retiePlay" type="button">Play</button>
+          <button id="retieMatch" type="button" class="ghost" aria-pressed="true">Matched</button>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="retieCanvas" aria-label="Top view of the shared path while re-tying: the old loop, the new loop and the blended loop, with thin lines pairing old and new samples."></canvas></div>
+      <div class="legend"><span style="color:var(--muted)"><i style="border-top-style:dashed"></i>old path</span><span style="color:var(--cyan)"><i style="border-top-style:dashed"></i>new path</span><span style="color:var(--accent)"><i></i>blend</span><span style="color:var(--muted)"><i style="border-top-width:1px"></i>sample pairs</span></div>
+      <p class="fig-cap">The shared path seen from above, with the sketch's <code>pathPoint</code>, its angle-matching search and its blend of directions, leaving out the spin about the hole. Naive pairs sample j with sample j and blends positions. The blend slider is the raw progress; the shape uses its smoothstep.</p>
+    </div>
+  </section>
+
+  <!-- 7. Reflections -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The reflections · <b>tangle.js</b></div>
+      <h2>Bands reflecting bands</h2>
+      <p>Chrome only convinces when it reflects its surroundings, and most of what surrounds a band is other bands. The environment map can't show them. So whenever the coil changes, the merged field is also baked into a coarse distance volume: 32³ voxels in a cube around the coil, stored as 32 slices in a 192 × 192 half-float atlas. Each texel holds its distance, the distance one voxel further along z (so one fetch interpolates between slices), and the ids of the nearest samples of the two nearest bands. Voxels more than 8 voxels from every chunk's bounding sphere take that bound as their distance and skip the bands.</p>
+      <p>For each front pixel (at half resolution on desktops, full resolution on phones), the reflected ray marches the volume, up to 24 steps (12 on phones) of <code>max(|d|, voxel / 2, 0.12·t)</code>. The march is only a search. When the ray passes close to a band it reads the ids stored there and keeps up to three distinct bands, each at the step where the ray came closest. Its own band only counts once the ray has got away from it.</p>
+      <p>Each candidate is then hit exactly. The voxel's stored sample changes between neighbouring pixels, and used as is it would give staircase edges and patches like torn foil, so Newton steps refine the sample along the band until it no longer depends on where the search started. There the band is taken as its section swept straight along its tangent, which the ray meets in closed form (a slab test through the rounded rectangle, then the corner circle), over three passes. The pinched, fluted and lens reliefs have no closed form, so they are sphere-traced in 6 steps. Coverage is antialiased over the ray's cone, the hits are composited front to back, and where the ray passes two bands within the blend distance an approximate fillet joins them. A band seen in a reflection mostly darkens what is behind it, with a little of its own blurred reflection.</p>
+      <p>A mirror-sharp reflection of a curved band shimmers as it moves. So each frame the reflected ray is jittered within a small cone, half the pixel's footprint plus 0.75 times the chrome's roughness of 0.06. The jitter is interleaved gradient noise per pixel, stepped along the R2 sequence each frame, and the results are averaged over time. The history is reprojected through each vertex's previous position and rejected where its depth is off by more than 2 % plus 0.01. While anything moves, it is also clamped to the mean ± 1.25 standard deviations of this frame's 3 × 3 neighbourhood. It averages up to 16 frames in motion and 64 when still.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>One jittered frame, and the running average</h3>
+        <div class="controls">
+          <label for="accFrames">Frames <input id="accFrames" type="range" min="1" max="64" step="1" value="12"><output id="accFramesOut" for="accFrames">12</output></label>
+          <button id="accMove" type="button" class="ghost" aria-pressed="false">Still: up to 64</button>
+        </div>
+      </div>
+      <canvas id="accCanvas" aria-label="Two pixelated panels of a reflected stripe pattern: a single noisy jittered frame on the left, and the smooth average of several frames on the right."></canvas>
+      <div class="readout"><span>left <b>frame <span id="accLeft">12</span> alone</b></span><span>right <b>average, newest frame weighted 1/<span id="accN">12</span></b></span></div>
+      <p class="fig-cap">Illustrative: a made-up reflection of curved stripes, with the jitter cone growing to the right. Each cell is one pixel, jittered with the shader's noise and R2 step, and accumulated with the resolve pass's running average, <code>mix(history, current, 1/n)</code> with n capped.</p>
+    </div>
+    <div class="facts">
+      <div class="fact warn"><b>No NaNs on Metal</b><span>On Metal, fast-math <code>cos</code> can overshoot −1 slightly, which would take the film's <code>0.5 + 0.5·cos</code> below zero and <code>pow</code> of a negative base to NaN, spread by the blurs into magenta squares. So the film is clamped where it is made, <code>pow</code> gets <code>max(…, 1e-7)</code>, and the history tests for non-finite values on the float bits, which fast-math can't optimise away the way it can <code>isnan</code>.</span></div>
+      <div class="fact"><b>Where it runs</b><span>The trace and resolve run inside the pipeline's colour pass, just before the bands draw, so they see this frame's prepass depth and camera, lens and sample jitter included.</span></div>
+      <div class="fact"><b>Glass uses it too</b><span>The glass finish marches the same volume along the refracted ray to measure how far it travels through the bands behind, so overlaps absorb more colour. Its dark rims come from the facing angle instead: near the silhouette the body fades to 0.12 of its brightness.</span></div>
+      <div class="fact"><b>Front pixels only</b><span>Hidden fragments skip the exact normal and the trace. Each pixel compares its depth to the prepass depth first.</span></div>
+    </div>
+  </section>
+
+  <!-- 8. Thin film -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The colour · <b>tangle.js</b> · <b>main.js</b></div>
+      <h2>Colour from a film a few hundred nanometres thick</h2>
+      <p>The colours are thin-film interference, as on a soap bubble or anodised titanium. Light reflected from the top and the bottom of a thin layer travels different distances, and wavelengths whose path difference is a whole number of waves reinforce while the others cancel. The shader evaluates that at three wavelengths, one per channel, with the refracted angle from Snell's law.</p>
+    </div>
+    <div class="formula"><span class="c">// thinFilm(d, ndv), per channel at wavelength λ</span><br>cosθt = √(1 − (1 − ndv²) / n²) &nbsp; <span class="c">n = 2.0</span><br>phase = 2π · 2·n·d·cosθt / λ + π<br>R = ½ + ½·cos(phase), clamped to 0…1</div>
+    <div class="col prose">
+      <p>The film's index is 2.0, a dense film like titanium oxide. From face-on to grazing, cos θt only falls from 1 to about 0.87, so the colours don't swing far with viewing angle, and most of the variation comes from thickness. The thickness drifts over the surface as three slow sine waves, so the colours swim like oil on water. In the purple-cyan palette it also follows the surface's facing, so each band's faces, folds and rims take different hues.</p>
+      <p>A palette is a window of thickness. Purple-cyan runs from 278 to 326 nm, evaluated at 650, 520 and 470 nm and raised to the power 2.4 to deepen the hues. Gold-green runs from 203 to 238 nm and pink-orange from 95 to 135 nm, both at 650, 532 and 450 nm.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Interference colour by thickness and angle</h3>
+        <div class="controls">
+          <label for="filmPal">Palette <select id="filmPal"><option value="0" selected>purple-cyan</option><option value="1">gold-green</option><option value="2">pink-orange</option></select></label>
+          <label for="filmAng">Angle <input id="filmAng" type="range" min="0" max="80" step="1" value="30"><output id="filmAngOut" for="filmAng">30°</output></label>
+        </div>
+      </div>
+      <div class="scroll"><canvas id="filmCanvas" aria-label="A colour map of thin-film reflectance across thickness 0 to 400 nanometres and viewing angle 0 to 80 degrees, with each palette's thickness window marked below."></canvas></div>
+      <p class="fig-cap">Computed with the shader's <code>thinFilm()</code>. The map uses the chosen palette's wavelengths and power; the strips below show every palette at the chosen angle, its window in full strength. Shown as linear reflectance with a display gamma, before the palette's gain and any lighting.</p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Palette</th><th>Film</th><th>λ (R, G, B)</th><th>Power, gain</th><th>Glass absorbs</th></tr></thead>
+        <tbody>
+          <tr><td>purple-cyan</td><td>278–326 nm</td><td>650, 520, 470</td><td>2.4, 3</td><td>0.9, <b>1.6</b>, 0.25</td></tr>
+          <tr><td>gold-green</td><td>203–238 nm</td><td>650, 532, 450</td><td>1, 1.6</td><td>0.2, 0.5, <b>1.8</b></td></tr>
+          <tr><td>pink-orange</td><td>95–135 nm</td><td>650, 532, 450</td><td>1, 1.6</td><td>0.2, <b>1.4</b>, 1.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col prose">
+      <p>The finishes use the film in different ways. <strong>Holographic</strong> chrome multiplies the reflection by it. In purple-cyan the film also washes out to silver where the reflection is bright and toward grazing angles; the other palettes keep their colour everywhere. With the bright baked studio, purple-cyan's gain is dimmed to 0.4 of its value, since that studio washes saturated chrome out to pastel. <strong>Pearl</strong> is a pale body lit by the pipeline under an iridescent coat: the film tints the body a little and its sheen a lot. <strong>Glass</strong> refracts the backdrop at an index of 1.45, bent like a thick lens, and absorbs colour along the path the ray travels through the bands, <code>exp(−absorption · 1.6 · path)</code>. Each palette absorbs the colours opposite its hue, so overlaps deepen toward it.</p>
+      <p>Finish and palette changes cross-fade over 1.2 s, mixed in a compressed <code>c / (1 + c)</code> range so a bright finish doesn't swamp a dark one mid-fade. The other finishes compile in the background at startup, so switching never stalls.</p>
+    </div>
+  </section>
+
+  <!-- 9. Studio and lens -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The studio · <b>main.js</b> · <b>modules/pipeline</b></div>
+      <h2>Studio and lens</h2>
+      <p>The coil floats in a grey cyc, <code>#dcdad6</code>, above a floor at y = −1.7, lit by the shared pipeline's studio: a key at intensity 30 from the upper left, with fill, floor and wall bounce. Shadows are PCSS, denoised in screen space. The floor and the pearl finish get ambient occlusion and one bounce of indirect light. The frame ends with bloom at 0.03, a 0.15 vignette, a little grain and AgX at an exposure of 1.5. Chrome and glass are drawn entirely as emissive colour, so their colour pass skips the pipeline's lighting. Reflections can show the baked studio or a photographed one, Studio Small 03, turned so its brightest light sits at the key's azimuth and scaled to the studio's brightness.</p>
+      <p>Depth of field focuses on the near side of the coil, 0.45 in front of the orbit target. While anything moves, each frame gets the pipeline's tiled half-resolution gather. Once the camera, the scene and the time hold still, frames rendered from points across the lens are averaged instead, up to 24, which gives the exact blur with correct occlusion. Section, finish, palette, iridescence and merge changes restart the average.</p>
+    </div>
+    <figure class="still">
+      <img src="explainer/wide.jpg" width="1200" height="630" alt="The coil in a wide frame, its far side softly out of focus." loading="lazy" decoding="async">
+      <figcaption>The share card: the near side in focus, the far bands blurred by the lens.</figcaption>
+    </figure>
+    <div class="facts">
+      <div class="fact"><b>Paused, but alive</b><span>Section morphs and finish fades run on wall-clock time, so they play out while the coil is paused. Pausing also restarts the Auto change countdown.</span></div>
+      <div class="fact"><b>Never under the floor</b><span>The orbit's lowest tilt depends on the camera distance, so the camera can't sink below the floor, and the camera is kept inside the cyc.</span></div>
+    </div>
+  </section>
+
+  <!-- Controls -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Using it</div>
+      <h2>Controls</h2>
+    </div>
+    <ul class="keys col">
+      <li><b>Drag</b> orbits; pinch or scroll zooms.</li>
+      <li><b>Finish</b>: holographic, pearl or glass.</li>
+      <li><b>Palette</b>: purple-cyan, gold-green or pink-orange.</li>
+      <li><b>Iridescence</b>: strength of the thin film.</li>
+      <li><b>Bands</b>: 2 to 5. <b>Merge</b>: how softly neighbours blend.</li>
+      <li><b>Section</b>: squircle, pinched, fluted or lens, with <b>Section amount</b>.</li>
+      <li><b>Motion</b>: how fast the coil writhes.</li>
+      <li><b>Auto change</b> (on by default): a new knot every 10 s without input (<b>Change every</b>, 5–60 s), counted once the last re-tie has finished morphing.</li>
+      <li><b>Reflections</b>: the baked studio or the studio HDR.</li>
+      <li><b>Depth of field</b>: the blur, 0 to 0.03.</li>
+      <li><b>T</b> or <b>Re-tie</b> ties a new knot; <b>R</b> randomises.</li>
+      <li><b>Space</b> pauses, <b>F</b> toggles fullscreen, <b>Tab</b> hides the panel, <b>P</b> saves a screenshot (<b>Shift+P</b> at 2×).</li>
+    </ul>
+  </section>
+
+  <footer class="col">
+    <div class="meta">
+        <span><b>three.js</b> r187</span><span>WebGL2</span><span>desktop and phones</span><span>made in <b>Claude Code</b> with Opus 5.5</span>
+      </div>
+    Day 4 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/4/">spite.github.io/codevember-2026/4</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/4">4/ of the codevember-2026 repository</a>. Rendered with the repo's shared photographic pipeline, described in the <a href="../modules/pipeline/explainer.html">rendering pipeline explainer</a>. The reflection HDR is Studio Small 03 from Poly Haven (CC0).
+  </footer>
+</main>
+
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+  const TAU = Math.PI * 2;
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const sstep = (x) => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };
+
+  // Theme: redraw everything, and re-read token colours.
+  const redrawers = [];
+  let rgbCache = {};
+  const onTheme = () => { rgbCache = {}; redrawers.forEach((f) => f()); };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", onTheme);
+  new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const probe = document.createElement("canvas");
+  probe.width = probe.height = 1;
+  const pctx = probe.getContext("2d", { willReadFrequently: true });
+  const rgb = (name) => {
+    if (rgbCache[name]) return rgbCache[name];
+    pctx.clearRect(0, 0, 1, 1);
+    pctx.fillStyle = "#000";
+    pctx.fillStyle = css(name) || "#000";
+    pctx.fillRect(0, 0, 1, 1);
+    const d = pctx.getImageData(0, 0, 1, 1).data;
+    return (rgbCache[name] = [d[0], d[1], d[2]]);
+  };
+  const rgba = (c, a = 1, k = 1) => `rgba(${Math.round(clamp(c[0] * k, 0, 255))},${Math.round(clamp(c[1] * k, 0, 255))},${Math.round(clamp(c[2] * k, 0, 255))},${a})`;
+  const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const font = (px, w = 400) => `${w} ${px}px "JetBrains Mono", ui-monospace, monospace`;
+
+  // Canvas sized to its box at device pixel ratio; draw(ctx, w, h, dpr) in CSS pixels.
+  function fitCanvas(c, aspect, draw) {
+    const go = () => {
+      const w = c.clientWidth || 600;
+      const h = Math.round(w * (typeof aspect === "function" ? aspect(w) : aspect));
+      const d = Math.min(2, devicePixelRatio || 1);
+      const W = Math.round(w * d), H = Math.round(h * d);
+      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+      c.style.height = h + "px";
+      const ctx = c.getContext("2d");
+      ctx.setTransform(d, 0, 0, d, 0, 0);
+      draw(ctx, w, h, d);
+    };
+    new ResizeObserver(() => requestAnimationFrame(go)).observe(c);
+    redrawers.push(go);
+    go();
+    return go;
+  }
+
+  // One animation clock for the figures that move on their own.
+  const anims = [];
+  let lastT = 0;
+  const loop = (t) => {
+    const dt = lastT ? Math.min(0.05, (t - lastT) / 1000) : 0;
+    lastT = t;
+    for (const a of anims) if (a.visible && a.playing()) a.tick(dt);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+  const animate = (el, playing, tick) => {
+    const a = { visible: true, playing, tick };
+    new IntersectionObserver((es) => es.forEach((e) => (a.visible = e.isIntersecting))).observe(el);
+    anims.push(a);
+    return a;
+  };
+
+  // A distance field shaded into the canvas: contours every `spacing`, the zero line bold.
+  function drawField(ctx, w, h, dpr, toWorld, f, o) {
+    const rf = Math.min(dpr, 1.5);
+    const pw = Math.max(1, Math.round(w * rf)), ph = Math.max(1, Math.round(h * rf));
+    const off = document.createElement("canvas");
+    off.width = pw; off.height = ph;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(pw, ph);
+    const D = img.data;
+    const px = o.unit / rf;
+    for (let j = 0; j < ph; j++) {
+      for (let i = 0; i < pw; i++) {
+        const p = toWorld((i + 0.5) / rf, (j + 0.5) / rf);
+        const d = f(p[0], p[1]);
+        let c = d < 0 ? o.inside : o.bg;
+        const m = d / o.spacing;
+        const fr = Math.abs(m - Math.round(m)) * o.spacing;
+        const la = Math.max(0, 1 - fr / (px * 0.9)) * (d < 0 ? o.lineInA : o.lineA);
+        if (la > 0) c = mixc(c, o.line, la);
+        if (o.zero) {
+          const za = Math.max(0, 1 - Math.abs(d) / (px * o.zeroW));
+          if (za > 0) c = mixc(c, o.zero, za);
+        }
+        const k = (j * pw + i) * 4;
+        D[k] = c[0]; D[k + 1] = c[1]; D[k + 2] = c[2]; D[k + 3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, 0, 0, w, h);
+  }
+
+  /* ---------- Coil: knots.js path, frame and waves ---------- */
+  const SAMPLES = 128, MAXT = 5, SIZE = 1.15, BEND = 0.45, BEND_SPAN = 0.3, RETIE_SPAN = 1.2;
+  const rng = (seed) => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  function makeCoil(p, q, n, twistK, seed) {
+    const R0 = rng(seed);
+    const r = (a, b) => a + R0() * (b - a);
+    const sign = () => (R0() < 0.5 ? -1 : 1);
+    const pick = (a) => a[Math.floor(R0() * a.length)];
+    const wave = (amp, ks) => ({ k: pick(ks), amp, phase: r(0, TAU), speed: r(0.12, 0.3) * sign() });
+    const stack = 0.26 + 0.07 * n;
+    const b = Math.min(0.085, (0.5 * stack) / n / 1.25);
+    const a = b * r(2.7, 3.3);
+    const half = 0.5 * Math.max(stack, 2 * a) * 0.95;
+    const m = p === 1 ? r(0, 0.06) : (half / Math.sin(Math.PI / p)) * r(0.95, 1.1);
+    const R = m + half + r(0.16, 0.3) * (p === 1 ? 2.5 : 1);
+    const scale = SIZE / (R + m + half);
+    return {
+      n, p, q, R, m, scale,
+      my: m * r(0.8, 1.2),
+      beta: { phase: r(0, TAU), speed: r(0.04, 0.1) * sign() },
+      radial: wave(R * r(0.03, 0.08), [1, 2, 3]),
+      lift: wave(r(0.04, 0.12), [1, 2, 3]),
+      twist: { k: twistK, phase: r(0, TAU), speed: r(0.12, 0.25) * sign(), wobble: wave(r(0.2, 0.6), [1, 2]) },
+      bands: Array.from({ length: n }, () => ({
+        a: a * r(0.85, 1.12), b: b * r(0.85, 1.1),
+        gap: wave(b * r(0.4, 0.9), [1, 2, 3, 4]), slide: wave(a * r(0.1, 0.45), [1, 2, 3]),
+        tilt: wave(r(0.05, 0.3), [1, 2, 3]), swell: wave(r(0.05, 0.18), [2, 3, 4, 5]),
+      })),
+      gap: b * r(0.25, 0.6),
+    };
+  }
+  const at = (w, phi, s) => w.amp * Math.sin(w.k * phi + w.phase + s * w.speed);
+  function pathPoint(c, phi, s, out, o) {
+    const al = c.p * phi, be = c.q * phi + c.beta.phase + s * c.beta.speed;
+    const rad = c.R + at(c.radial, phi, s) + c.m * Math.cos(be);
+    out[o] = rad * Math.cos(al);
+    out[o + 1] = c.my * Math.sin(be) + at(c.lift, phi, s);
+    out[o + 2] = rad * Math.sin(al);
+  }
+  const pathBuf = new Float64Array(SAMPLES * 3);
+  // Every band of coil c at time s, laid out like the sketch's texture (unrotated).
+  function sampleCoil(c, s, out) {
+    const { p, scale: k, n } = c, path = pathBuf;
+    for (let j = 0; j < SAMPLES; j++) pathPoint(c, (j / SAMPLES) * TAU, s, path, j * 3);
+    const offs = new Float64Array(MAXT);
+    for (let j = 0; j < SAMPLES; j++) {
+      const phi = (j / SAMPLES) * TAU;
+      const j0 = ((j + SAMPLES - 1) % SAMPLES) * 3, j1 = ((j + 1) % SAMPLES) * 3, o = j * 3;
+      let tx = path[j1] - path[j0], ty = path[j1 + 1] - path[j0 + 1], tz = path[j1 + 2] - path[j0 + 2];
+      const tl = Math.hypot(tx, ty, tz);
+      tx /= tl; ty /= tl; tz /= tl;
+      const h2 = 4 / (tl * tl);
+      let kx = (path[j1] - 2 * path[o] + path[j0]) * h2, ky = (path[j1 + 1] - 2 * path[o + 1] + path[j0 + 1]) * h2, kz = (path[j1 + 2] - 2 * path[o + 2] + path[j0 + 2]) * h2;
+      const kt = kx * tx + ky * ty + kz * tz;
+      kx -= kt * tx; ky -= kt * ty; kz -= kt * tz;
+      const kk = Math.max(kx * kx + ky * ky + kz * kz, 1e-12);
+      const al = p * phi, rx = Math.cos(al), rz = Math.sin(al);
+      const d = rx * tx + rz * tz;
+      let nx = rx - d * tx, ny = -d * ty, nz = rz - d * tz;
+      const nl = Math.hypot(nx, ny, nz);
+      nx /= nl; ny /= nl; nz /= nl;
+      const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+      const th = c.twist.k * phi + c.twist.phase + s * c.twist.speed + at(c.twist.wobble, phi, s);
+      const ct = Math.cos(th), st = Math.sin(th);
+      const sx = ct * nx + st * bx, sy = ct * ny + st * by, sz = ct * nz + st * bz;
+      const wx = -st * nx + ct * bx, wy = -st * ny + ct * by, wz = -st * nz + ct * bz;
+      let total = 0;
+      for (let i = 0; i < n; i++) {
+        const B = c.bands[i];
+        const g = i > 0 ? Math.max(c.gap + at(B.gap, phi, s), -0.3 * B.b) : 0;
+        total += (i > 0 ? c.bands[i - 1].b + g : 0) + (i > 0 ? B.b : 0);
+        offs[i] = total;
+      }
+      for (let i = 0; i < n; i++) {
+        const B = c.bands[i];
+        const off = offs[i] - 0.5 * total;
+        const sl = at(B.slide, phi, s), tilt = at(B.tilt, phi, s), sw = 1 + at(B.swell, phi, s);
+        let ox = off * sx + sl * wx, oy = off * sy + sl * wy, oz = off * sz + sl * wz;
+        const bend = ox * kx + oy * ky + oz * kz;
+        if (bend > BEND) {
+          const pull = (bend - BEND - BEND_SPAN * Math.tanh((bend - BEND) / BEND_SPAN)) / kk;
+          ox -= pull * kx; oy -= pull * ky; oz -= pull * kz;
+        }
+        const cu = Math.cos(tilt), su = Math.sin(tilt);
+        const o0 = (i * SAMPLES + j) * 4, o1 = ((MAXT + i) * SAMPLES + j) * 4;
+        out[o0] = k * (path[o] + ox); out[o0 + 1] = k * (path[o + 1] + oy); out[o0 + 2] = k * (path[o + 2] + oz);
+        out[o0 + 3] = k * B.a * sw;
+        out[o1] = cu * wx + su * sx; out[o1 + 1] = cu * wy + su * sy; out[o1 + 2] = cu * wz + su * sz;
+        out[o1 + 3] = k * B.b * (0.5 + 0.5 * sw);
+      }
+    }
+  }
+
+  {
+    const c = $("coilCanvas");
+    const ins = ["coilP", "coilQ", "coilN", "coilK"].map($);
+    const play = $("coilPlay");
+    let playing = !reduce, s = 4, spin = 0.5, coil;
+    const data = new Float64Array(SAMPLES * MAXT * 8);
+    const quads = [];
+    const build = () => {
+      ins.forEach((i) => ($(i.id + "Out").textContent = i.value));
+      coil = makeCoil(+ins[0].value, +ins[1].value, +ins[2].value, +ins[3].value, 4);
+    };
+    const tilt = 1.0;
+    const view = (x, y, z, out) => {
+      const cy = Math.cos(spin), sy = Math.sin(spin), ca = Math.cos(tilt), sa = Math.sin(tilt);
+      const x1 = cy * x + sy * z, z1 = -sy * x + cy * z;
+      out[0] = x1; out[1] = ca * y - sa * z1; out[2] = sa * y + ca * z1;
+    };
+    const draw = (ctx, w, h) => {
+      sampleCoil(coil, s, data);
+      const n = coil.n, cols = [1, 2, 3, 4, 5].map((i) => rgb("--band-" + i));
+      const Dcam = 5, f = (Math.min(w, h * 1.1) * 0.43) / SIZE;
+      const P = (v) => [w / 2 + (v[0] * f * Dcam) / (Dcam - v[2]), h / 2 - (v[1] * f * Dcam) / (Dcam - v[2])];
+      quads.length = 0;
+      const L = [-0.35, 0.65, 0.68];
+      const A = [0, 0, 0], B = [0, 0, 0], C = [0, 0, 0], E = [0, 0, 0], N = [0, 0, 0];
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < SAMPLES; j++) {
+          const j1 = (j + 1) % SAMPLES;
+          const o0 = (i * SAMPLES + j) * 4, o1 = (i * SAMPLES + j1) * 4;
+          const f0 = ((MAXT + i) * SAMPLES + j) * 4, f1 = ((MAXT + i) * SAMPLES + j1) * 4;
+          const a0 = data[o0 + 3], a1 = data[o1 + 3];
+          view(data[o0] + a0 * data[f0], data[o0 + 1] + a0 * data[f0 + 1], data[o0 + 2] + a0 * data[f0 + 2], A);
+          view(data[o0] - a0 * data[f0], data[o0 + 1] - a0 * data[f0 + 1], data[o0 + 2] - a0 * data[f0 + 2], B);
+          view(data[o1] - a1 * data[f1], data[o1 + 1] - a1 * data[f1 + 1], data[o1 + 2] - a1 * data[f1 + 2], C);
+          view(data[o1] + a1 * data[f1], data[o1 + 1] + a1 * data[f1 + 1], data[o1 + 2] + a1 * data[f1 + 2], E);
+          const tx = data[o1] - data[o0], ty = data[o1 + 1] - data[o0 + 1], tz = data[o1 + 2] - data[o0 + 2];
+          const ux = data[f0], uy = data[f0 + 1], uz = data[f0 + 2];
+          view(ty * uz - tz * uy, tz * ux - tx * uz, tx * uy - ty * ux, N);
+          const nl = Math.hypot(N[0], N[1], N[2]) || 1;
+          const lam = Math.abs((N[0] * L[0] + N[1] * L[1] + N[2] * L[2]) / nl);
+          const facing = Math.abs(N[2] / nl);
+          quads.push({ z: (A[2] + B[2] + C[2] + E[2]) / 4, pts: [P(A), P(B), P(C), P(E)], col: cols[i], k: 0.42 + 0.5 * lam + 0.25 * Math.pow(facing, 8) });
+        }
+      }
+      quads.sort((a, b) => a.z - b.z);
+      ctx.clearRect(0, 0, w, h);
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 0.7;
+      for (const q of quads) {
+        ctx.beginPath();
+        ctx.moveTo(q.pts[0][0], q.pts[0][1]);
+        for (let k = 1; k < 4; k++) ctx.lineTo(q.pts[k][0], q.pts[k][1]);
+        ctx.closePath();
+        const s = rgba(q.col, 1, q.k);
+        ctx.fillStyle = s; ctx.strokeStyle = s;
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = css("--muted");
+      ctx.font = font(12);
+      ctx.fillText(`(${coil.p}, ${coil.q}) torus knot · ${coil.n} bands · twist ${coil.twist.k}`, 4, h - 8);
+    };
+    build();
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.95 : 0.62), draw);
+    ins.forEach((i) => i.addEventListener("input", () => { build(); go(); }));
+    const label = () => (play.textContent = playing ? "Pause" : "Play");
+    label();
+    play.addEventListener("click", () => { playing = !playing; label(); });
+    animate(c, () => playing, (dt) => { s += dt; spin += dt * 0.12; go(); });
+  }
+
+  /* ---------- Section: tangle.js SECTION ---------- */
+  const SD = { CORNER: 0.8, CORNER_DENSITY: 2, PINCH: 0.45, PINCH_OUT: 0.18, FLUTE: 0.1, FLUTES: 3, LENS: 0.5 };
+  function reliefFace(u, ht, S) {
+    const v = 1 - u * u, a = (Math.PI / 2) * SD.FLUTES * (u + 1), sa = Math.sin(a), ca = Math.cos(a);
+    const off = -S[0] * SD.PINCH * v * v - S[1] * SD.FLUTE * sa * sa - S[2] * SD.LENS * (1 - v * v);
+    const rate = 4 * u * v * (S[0] * SD.PINCH - S[2] * SD.LENS) - S[1] * SD.FLUTE * Math.PI * SD.FLUTES * sa * ca;
+    return [ht * off, ht * rate];
+  }
+  function reliefArc(nx, ny, ht, S) {
+    const s2 = 2 * nx * ny, c2 = nx * nx - ny * ny;
+    return [ht * (S[0] * SD.PINCH_OUT * s2 * s2 - S[2] * SD.LENS), ht * (S[0] * SD.PINCH_OUT * 4 * s2 * c2)];
+  }
+  // Gradient (x, y) and signed distance (z) of the section with half sizes (hx, hy) at q.
+  function section(qx, qy, hx, hy, S) {
+    const rc = hy * SD.CORNER, sx = qx < 0 ? -1 : 1, sy = qy < 0 ? -1 : 1;
+    const ex = hx - rc, ey = hy - rc, dx = Math.abs(qx) - ex, dy = Math.abs(qy) - ey;
+    let r0, r1, r2;
+    if (dx > 0 && dy > 0) {
+      const l = Math.hypot(dx, dy), nx = dx / l, ny = dy / l;
+      const k = reliefArc(nx, ny, hy, S), f = k[1] / Math.max(l, 0.25 * rc);
+      r0 = nx + f * ny; r1 = ny - f * nx; r2 = l - rc - k[0];
+    } else if (dx > dy) {
+      r0 = 1; r1 = 0; r2 = dx - rc + S[2] * SD.LENS * hy;
+    } else {
+      const exx = Math.max(ex, 1e-5), k = reliefFace(clamp(Math.abs(qx) / exx, 0, 1), hy, S);
+      r0 = -k[1] / exx; r1 = 1; r2 = dy - rc - k[0];
+    }
+    const inv = 1 / Math.hypot(r0, r1);
+    return [sx * r0 * inv, sy * r1 * inv, r2 * inv];
+  }
+  // Point (0, 1) and normal (2, 3) at fraction f of the outline.
+  function outline(f, hx, hy, S) {
+    const rc = hy * SD.CORNER, ex = hx - rc, ey = hy - rc, arc = (Math.PI / 2) * rc * SD.CORNER_DENSITY;
+    const k = Math.floor(f * 4);
+    let g = f * 4 - k;
+    if (k % 2 === 1) g = 1 - g;
+    const t = g * (ey + arc + ex);
+    let r;
+    if (t < ey) r = [hx - S[2] * SD.LENS * hy, t, 1, 0];
+    else if (t < ey + arc) {
+      const a = ((t - ey) / arc) * (Math.PI / 2), nx = Math.cos(a), ny = Math.sin(a);
+      const o = reliefArc(nx, ny, hy, S), rad = rc + o[0], q = o[1] / Math.max(rad, 0.25 * rc);
+      const mx = nx + q * ny, my = ny - q * nx, l = Math.hypot(mx, my);
+      r = [ex + rad * nx, ey + rad * ny, mx / l, my / l];
+    } else {
+      const x = ex - (t - ey - arc), exx = Math.max(ex, 1e-5);
+      const o = reliefFace(clamp(x / exx, 0, 1), hy, S), nx = -o[1] / exx, l = Math.hypot(nx, 1);
+      r = [x, hy + o[0], nx / l, 1 / l];
+    }
+    const mx = k === 1 || k === 2 ? -1 : 1, my = k >= 2 ? -1 : 1;
+    return [r[0] * mx, r[1] * my, r[2] * mx, r[3] * my];
+  }
+  const SIDES = 36;
+
+  {
+    const c = $("secCanvas"), shape = $("secShape"), amt = $("secAmt"), out = $("secAmtOut");
+    const weights = () => { const a = +amt.value, k = +shape.value, S = [0, 0, 0]; if (k > 0) S[k - 1] = a; return S; };
+    const draw = (ctx, w, h, dpr) => {
+      const S = weights(), hx = 3, hy = 1;
+      const sc = Math.min(w / 8, h / 3.4), cx = w / 2, cy = h / 2;
+      const toWorld = (x, y) => [(x - cx) / sc, (cy - y) / sc];
+      const P = (x, y) => [cx + x * sc, cy - y * sc];
+      const accent = rgb("--accent"), panel = rgb("--panel");
+      drawField(ctx, w, h, dpr, toWorld, (x, y) => section(x, y, hx, hy, S)[2], {
+        unit: 1 / sc, spacing: 0.1, bg: panel, inside: mixc(panel, accent, 0.14), line: rgb("--muted"), lineA: 0.28, lineInA: 0.2, zero: null,
+      });
+      // Plain rounded rectangle for reference.
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = css("--muted");
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i <= 400; i++) { const o = outline((i % 400) / 400, hx, hy, [0, 0, 0]); const p = P(o[0], o[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = css("--accent");
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      for (let i = 0; i <= 800; i++) { const o = outline((i % 800) / 800, hx, hy, S); const p = P(o[0], o[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+      ctx.closePath();
+      ctx.stroke();
+      // One ring's vertices (filled) and the next ring's, half a side round (hollow), with their normals.
+      for (let ring = 0; ring < 2; ring++) {
+        for (let k = 0; k < SIDES; k++) {
+          const o = outline((k + 0.5 * ring) / SIDES, hx, hy, S), p = P(o[0], o[1]);
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], ring ? 3.4 : 3.6, 0, TAU);
+          if (ring) { ctx.lineWidth = 1.4; ctx.strokeStyle = css("--accent"); ctx.fillStyle = css("--panel"); ctx.fill(); ctx.stroke(); }
+          else {
+            ctx.fillStyle = css("--accent"); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + o[2] * 14, p[1] - o[3] * 14);
+            ctx.lineWidth = 1; ctx.strokeStyle = css("--accent"); ctx.stroke();
+          }
+        }
+      }
+      ctx.fillStyle = css("--muted");
+      ctx.font = font(12);
+      ctx.fillText("half-width a = 3b", 6, 16);
+      ctx.fillText("half-thickness b", 6, 32);
+      ctx.fillText(`corner radius ${SD.CORNER}b`, 6, 48);
+    };
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.62 : 0.42), draw);
+    const upd = () => { out.textContent = (+amt.value).toFixed(2); go(); };
+    shape.addEventListener("change", upd);
+    amt.addEventListener("input", upd);
+  }
+
+  /* ---------- Merge: the bake's smin ---------- */
+  const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / Math.max(k, 1e-5); return Math.min(a, b) - h * h * k * 0.25; };
+  // A three-band, two-turn coil with every random range at its middle.
+  const TYP = (() => {
+    const n = 3, stack = 0.26 + 0.07 * n, b = Math.min(0.085, (0.5 * stack) / n / 1.25), a = b * 3;
+    const half = 0.5 * Math.max(stack, 2 * a) * 0.95, m = (half / Math.sin(Math.PI / 2)) * 1.025, R = m + half + 0.23;
+    const k = SIZE / (R + m + half);
+    return { b: b * k, a: a * k, gap: b * 0.425 * k };
+  })();
+  const MERGE_SCALE = 0.4;
+
+  {
+    const c = $("mergeCanvas"), sl = $("mergeK"), out = $("mergeKOut");
+    const { a, b, gap } = TYP, step = 2 * b + gap;
+    const bands = [{ y: -step, x: 0.15 * a }, { y: 0, x: -0.25 * a }, { y: step, x: 0.1 * a }];
+    const Z = [0, 0, 0];
+    const draw = (ctx, w, h, dpr) => {
+      const k = +sl.value * MERGE_SCALE;
+      const span = 0.74, sc = Math.min(w / span, h / 0.5), cx = w / 2, cy = h / 2;
+      const toWorld = (x, y) => [(x - cx) / sc, (cy - y) / sc];
+      const f = (x, y) => {
+        let d = section(x - bands[0].x, y - bands[0].y, a, b, Z)[2];
+        for (let i = 1; i < 3; i++) d = smin(d, section(x - bands[i].x, y - bands[i].y, a, b, Z)[2], k);
+        return d;
+      };
+      const panel = rgb("--panel");
+      drawField(ctx, w, h, dpr, toWorld, f, {
+        unit: 1 / sc, spacing: 0.01, bg: panel, inside: mixc(panel, rgb("--accent"), 0.2), line: rgb("--muted"), lineA: 0.35, lineInA: 0.25, zero: rgb("--accent"), zeroW: 1.6,
+      });
+      // Scale bar.
+      ctx.strokeStyle = css("--ink");
+      ctx.lineWidth = 1.5;
+      const x0 = 10, y0 = h - 12;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + 0.1 * sc, y0); ctx.stroke();
+      ctx.fillStyle = css("--ink"); ctx.font = font(12);
+      ctx.fillText("0.1", x0 + 0.1 * sc + 6, y0 + 4);
+      $("mergeKk").textContent = k.toFixed(3);
+      $("mergeKr").textContent = (k / b).toFixed(2);
+    };
+    $("mergeGap").textContent = gap.toFixed(3);
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.75 : 0.5), draw);
+    sl.addEventListener("input", () => { out.textContent = (+sl.value).toFixed(3); go(); });
+  }
+
+  /* ---------- Newton projection: swell() and the capsule reach ---------- */
+  function swell(d, b, blend) {
+    const x = d[2] - b[2];
+    if (blend < 1e-4 || x <= -blend) return d;
+    let s, ds;
+    if (x <= 0) { s = ((blend + x) * (blend + x)) / (4 * blend); ds = (blend + x) / (2 * blend); }
+    else { const th = Math.tanh(Math.min(x / blend, 15)); s = blend * (0.25 + 0.5 * th); ds = 0.5 * (1 - th * th); }
+    return [d[0] - ds * (d[0] - b[0]), d[1] - ds * (d[1] - b[1]), d[2] - s];
+  }
+  {
+    const c = $("newtonCanvas"), sl = $("newtonK"), out = $("newtonKOut"), btn = $("newtonStep");
+    const { a, b, gap } = TYP, step = 2 * b + gap;
+    const A = { x: 0, y: -step / 2 }, B = { x: 0.32 * a, y: step / 2 };
+    const Z = [0, 0, 0];
+    let iters = 1;
+    const draw = (ctx, w, h, dpr) => {
+      const k = +sl.value * MERGE_SCALE, reach = k < 1e-4 ? 0 : k * 1.75 + 0.02;
+      const sc = Math.min(w / 0.56, h / 0.36), cx = w / 2 - 0.03 * sc, cy = h / 2;
+      const toWorld = (x, y) => [(x - cx) / sc, (cy - y) / sc];
+      const P = (x, y) => [cx + x * sc, cy - y * sc];
+      const dA = (x, y) => section(x - A.x, y - A.y, a, b, Z), dB = (x, y) => section(x - B.x, y - B.y, a, b, Z);
+      const panel = rgb("--panel");
+      drawField(ctx, w, h, dpr, toWorld, (x, y) => smin(dA(x, y)[2], dB(x, y)[2], k), {
+        unit: 1 / sc, spacing: 0.01, bg: panel, inside: mixc(panel, rgb("--ink"), 0.06), line: rgb("--muted"), lineA: 0.16, lineInA: 0.1, zero: rgb("--ink"), zeroW: 1.3,
+      });
+      // The lower band's own outline, where its vertices start.
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = css("--accent");
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i <= 300; i++) { const o = outline((i % 300) / 300, a, b, Z), p = P(A.x + o[0], A.y + o[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (let v = 0; v < SIDES; v++) {
+        const o = outline(v / SIDES, a, b, Z);
+        let x = A.x + o[0], y = A.y + o[1];
+        const found = Math.hypot(x - B.x, y - B.y) - a < reach;
+        const p0 = P(x, y);
+        if (!found) {
+          ctx.beginPath(); ctx.arc(p0[0], p0[1], 3.2, 0, TAU); ctx.fillStyle = css("--muted"); ctx.fill();
+          continue;
+        }
+        const trail = [p0];
+        for (let i = 0; i < iters; i++) {
+          const f = swell(dA(x, y), dB(x, y), k);
+          const g2 = f[0] * f[0] + f[1] * f[1];
+          if (g2 < 1e-4) break;
+          const st = clamp(f[2] / g2, -0.1, 0.1);
+          x -= st * f[0]; y -= st * f[1];
+          trail.push(P(x, y));
+        }
+        ctx.strokeStyle = css("--accent");
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        trail.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(p0[0], p0[1], 3.4, 0, TAU); ctx.lineWidth = 1.4; ctx.fillStyle = css("--panel"); ctx.fill(); ctx.stroke();
+        const pe = trail[trail.length - 1];
+        ctx.beginPath(); ctx.arc(pe[0], pe[1], 3.4, 0, TAU); ctx.fillStyle = css("--accent"); ctx.fill();
+      }
+      ctx.fillStyle = css("--muted"); ctx.font = font(12);
+      const pb = P(B.x - a * 0.3, B.y + b + 0.014), pa = P(A.x - a, A.y - b - 0.024);
+      ctx.fillText("neighbour", pb[0], pb[1]);
+      ctx.fillText("own band", pa[0], pa[1]);
+    };
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.7 : 0.5), draw);
+    const label = () => (btn.textContent = iters === 0 ? "Step: start" : `Step ${iters} of 3`);
+    btn.addEventListener("click", () => { iters = (iters + 1) % 4; label(); go(); });
+    sl.addEventListener("input", () => { out.textContent = (+sl.value).toFixed(3); go(); });
+    label();
+  }
+
+  /* ---------- Frames: per-sample axis vs carried ---------- */
+  {
+    const c = $("frameCanvas"), btn = $("frameMode"), snapsOut = $("frameSnaps");
+    let carried = false, phase = 0.4;
+    const N = 160, width = 0.085;
+    const P = new Float64Array(N * 3), T = new Float64Array(N * 3), W = new Float64Array(N * 3);
+    const curve = (t, out, o) => {
+      out[o] = -1.15 + 2.3 * t;
+      out[o + 1] = 0.42 * Math.sin(TAU * 1.3 * t + phase) + 0.12 * Math.sin(TAU * 2.9 * t - 0.6 * phase);
+      out[o + 2] = 0.12 * Math.sin(TAU * 0.7 * t + 0.4);
+    };
+    const build = () => {
+      for (let j = 0; j < N; j++) curve(j / (N - 1), P, j * 3);
+      for (let j = 0; j < N; j++) {
+        const a = Math.max(j - 1, 0) * 3, b = Math.min(j + 1, N - 1) * 3;
+        let x = P[b] - P[a], y = P[b + 1] - P[a + 1], z = P[b + 2] - P[a + 2];
+        const l = Math.hypot(x, y, z);
+        T[j * 3] = x / l; T[j * 3 + 1] = y / l; T[j * 3 + 2] = z / l;
+      }
+      // Per sample: the direction the curve bends toward (its curvature), square to the tangent.
+      const bendAt = (j, out) => {
+        const a = Math.max(j - 1, 0) * 3, o = j * 3, b = Math.min(j + 1, N - 1) * 3;
+        let x = P[b] - 2 * P[o] + P[a], y = P[b + 1] - 2 * P[o + 1] + P[a + 1], z = P[b + 2] - 2 * P[o + 2] + P[a + 2];
+        const k = x * T[o] + y * T[o + 1] + z * T[o + 2];
+        x -= k * T[o]; y -= k * T[o + 1]; z -= k * T[o + 2];
+        const l = Math.hypot(x, y, z) || 1;
+        out[0] = x / l; out[1] = y / l; out[2] = z / l;
+      };
+      const v = [0, 0, 0];
+      bendAt(1, v);
+      W[0] = v[0]; W[1] = v[1]; W[2] = v[2];
+      for (let j = 1; j < N; j++) {
+        const q = j * 3, p = q - 3;
+        if (!carried) {
+          bendAt(Math.min(Math.max(j, 1), N - 2), v);
+          W[q] = v[0]; W[q + 1] = v[1]; W[q + 2] = v[2];
+          continue;
+        }
+        // knots.js carry(): least rotation from tangent p onto tangent q, then squared to it.
+        const ax = T[p], ay = T[p + 1], az = T[p + 2], bx = T[q], by = T[q + 1], bz = T[q + 2];
+        let x = W[p], y = W[p + 1], z = W[p + 2];
+        const cc = 1 + ax * bx + ay * by + az * bz;
+        if (cc > 1e-6) {
+          const hx = ax + bx, hy = ay + by, hz = az + bz;
+          const k1 = 2 * (ax * x + ay * y + az * z), k2 = (hx * x + hy * y + hz * z) / cc;
+          x += k1 * bx - k2 * hx; y += k1 * by - k2 * hy; z += k1 * bz - k2 * hz;
+        }
+        const k = x * bx + y * by + z * bz;
+        x -= k * bx; y -= k * by; z -= k * bz;
+        const l = Math.hypot(x, y, z) || 1;
+        W[q] = x / l; W[q + 1] = y / l; W[q + 2] = z / l;
+      }
+    };
+    const tilt = -0.5;
+    const view = (x, y, z) => { const ca = Math.cos(tilt), sa = Math.sin(tilt); return [x, ca * y - sa * z, sa * y + ca * z]; };
+    const draw = (ctx, w, h) => {
+      build();
+      const sc = Math.min(w / 2.6, h / 1.25), cx = w / 2, cy = h / 2;
+      const S = (v) => [cx + v[0] * sc, cy - v[1] * sc];
+      const quads = [];
+      let snaps = 0;
+      const marks = [];
+      for (let j = 0; j < N - 1; j++) {
+        const q = j * 3, r = q + 3;
+        const A = view(P[q] + width * W[q], P[q + 1] + width * W[q + 1], P[q + 2] + width * W[q + 2]);
+        const B = view(P[q] - width * W[q], P[q + 1] - width * W[q + 1], P[q + 2] - width * W[q + 2]);
+        const C = view(P[r] - width * W[r], P[r + 1] - width * W[r + 1], P[r + 2] - width * W[r + 2]);
+        const D = view(P[r] + width * W[r], P[r + 1] + width * W[r + 1], P[r + 2] + width * W[r + 2]);
+        // Face normal T × W, toward the viewer or away.
+        const nx = T[q + 1] * W[q + 2] - T[q + 2] * W[q + 1], ny = T[q + 2] * W[q] - T[q] * W[q + 2], nz = T[q] * W[q + 1] - T[q + 1] * W[q];
+        const nv = view(nx, ny, nz);
+        quads.push({ z: (A[2] + B[2] + C[2] + D[2]) / 4, pts: [S(A), S(B), S(C), S(D)], front: nv[2] > 0, lit: 0.55 + 0.45 * Math.abs(nv[2]) });
+      }
+      // A snap: the axis turns more than 120 degrees within three samples; runs count once.
+      let run = -1;
+      for (let j = 0; j + 3 < N; j++) {
+        const q = j * 3, r = q + 9;
+        const flip = W[q] * W[r] + W[q + 1] * W[r + 1] + W[q + 2] * W[r + 2] < -0.5;
+        if (flip && run < 0) run = j;
+        if ((!flip || j + 4 >= N) && run >= 0) {
+          const m = (Math.round((run + j) / 2) + 1) * 3;
+          snaps++;
+          marks.push(S(view(P[m], P[m + 1], P[m + 2])));
+          run = -1;
+        }
+      }
+      quads.sort((a, b) => a.z - b.z);
+      ctx.clearRect(0, 0, w, h);
+      const fc = rgb("--accent"), bc = rgb("--magenta");
+      ctx.lineWidth = 0.7;
+      for (const q of quads) {
+        ctx.beginPath();
+        ctx.moveTo(q.pts[0][0], q.pts[0][1]);
+        for (let k = 1; k < 4; k++) ctx.lineTo(q.pts[k][0], q.pts[k][1]);
+        ctx.closePath();
+        const s = rgba(q.front ? fc : bc, 1, q.lit);
+        ctx.fillStyle = s; ctx.strokeStyle = s;
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.strokeStyle = css("--ink");
+      ctx.lineWidth = 1.6;
+      for (const m of marks) { ctx.beginPath(); ctx.arc(m[0], m[1], 15, 0, TAU); ctx.stroke(); }
+      snapsOut.textContent = `snaps: ${snaps}`;
+    };
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.7 : 0.42), draw);
+    btn.addEventListener("click", () => {
+      carried = !carried;
+      btn.textContent = carried ? "Axis: carried" : "Axis: per sample";
+      btn.setAttribute("aria-pressed", String(carried));
+      go();
+    });
+    animate(c, () => !reduce, (dt) => { phase += dt * 0.45; go(); });
+  }
+
+  /* ---------- Re-tie: alignCoils' angle map and _centreline ---------- */
+  {
+    const c = $("retieCanvas"), sel = $("retieNew"), sl = $("retieT"), out = $("retieTOut"), playBtn = $("retiePlay"), matchBtn = $("retieMatch");
+    const S = SAMPLES, FINE = 1024;
+    const from = makeCoil(2, 1, 3, 2, 21);
+    const targets = { 3: makeCoil(3, 1, 3, 3, 22), 1: makeCoil(1, 1, 3, 1, 23) };
+    let matched = true, playing = false;
+    const cache = {};
+    const scaled = (coil, phi, out, o) => { pathPoint(coil, phi, 0, out, o); for (let k = 0; k < 3; k++) out[o + k] *= coil.scale; };
+    function align(to) {
+      const pa = new Float64Array(S * 3), pb = new Float64Array(FINE * 3);
+      for (let j = 0; j < S; j++) scaled(to, (j / S) * TAU, pa, j * 3);
+      for (let j = 0; j < FINE; j++) scaled(from, (j / FINE) * TAU, pb, j * 3);
+      const dp = from.p - to.p;
+      const L = dp > 0 ? Math.min(TAU, Math.max(RETIE_SPAN, (1.5 * TAU * dp) / from.p)) : dp < 0 ? Math.min(TAU, (1.5 * TAU * -dp) / to.p) : TAU;
+      const lam = dp >= 0 ? 1 : Math.min(1, (0.9 * from.p) / -dp / (1.5 * (TAU / L) - 1));
+      const G = new Float64Array(S + 1);
+      for (let k = 0; k < S; k++) {
+        const x = ((k + 0.5) / S) * (TAU / L);
+        const bump = x < 1 ? (TAU / L) * 6 * x * (1 - x) : 0;
+        G[k + 1] = G[k] + 1 + (dp / from.p) * (lam * (bump - 1));
+      }
+      for (let k = 0; k <= S; k++) G[k] *= TAU / G[S];
+      const phis = new Float64Array(S);
+      const fill = (j0, c0) => { for (let j = 0; j < S; j++) phis[j] = c0 + G[(j - j0 + S) % S]; };
+      const cost = () => {
+        let sum = 0;
+        for (let j = 0; j < S; j++) {
+          const u = ((((phis[j] / TAU) * FINE) % FINE) + FINE) % FINE;
+          const i0 = Math.floor(u), f = u - i0, i1 = (i0 + 1) % FINE;
+          for (let k = 0; k < 3; k++) sum += (pb[i0 * 3 + k] + (pb[i1 * 3 + k] - pb[i0 * 3 + k]) * f - pa[j * 3 + k]) ** 2;
+        }
+        return sum;
+      };
+      let best = Infinity, bj = 0, bc = 0;
+      for (let j0 = 0; j0 < S; j0 += dp ? S / 16 : S)
+        for (let ci = 0; ci < 128; ci++) {
+          fill(j0, (ci / 128) * TAU);
+          const sum = cost();
+          if (sum < best) { best = sum; bj = j0; bc = (ci / 128) * TAU; }
+        }
+      fill(bj, bc);
+      const MB = new Float64Array(S * 3), naive = new Float64Array(S * 3);
+      for (let j = 0; j < S; j++) { scaled(from, phis[j], MB, j * 3); scaled(from, (j / S) * TAU, naive, j * 3); }
+      const oldFull = new Float64Array(FINE * 3), newFull = new Float64Array(FINE * 3);
+      for (let j = 0; j < FINE; j++) { scaled(from, (j / FINE) * TAU, oldFull, j * 3); scaled(to, (j / FINE) * TAU, newFull, j * 3); }
+      return { MA: pa, MB, naive, oldFull, newFull };
+    }
+    // knots.js _centreline for one band: steps from blended tangents, closed, then centred on the blend's mean.
+    function centreline(MA, MB, e, X) {
+      let wx = 0, wy = 0, wz = 0, ws = 0;
+      for (let j = 0; j < S; j++) {
+        const q = j * 3, q1 = ((j + 1) % S) * 3;
+        const ax = MA[q1] - MA[q], ay = MA[q1 + 1] - MA[q + 1], az = MA[q1 + 2] - MA[q + 2];
+        const bx = MB[q1] - MB[q], by = MB[q1 + 1] - MB[q + 1], bz = MB[q1 + 2] - MB[q + 2];
+        const la = Math.hypot(ax, ay, az) || 1e-9, lb = Math.hypot(bx, by, bz) || 1e-9;
+        const dot = (ax * bx + ay * by + az * bz) / (la * lb);
+        const tx = ((1 - e) * bx) / lb + (e * ax) / la, ty = ((1 - e) * by) / lb + (e * ay) / la + 2 * e * (1 - e) * (1 - dot), tz = ((1 - e) * bz) / lb + (e * az) / la;
+        const s = lb + (la - lb) * e, l = s / (Math.hypot(tx, ty, tz) || 1);
+        X[q] = tx * l; X[q + 1] = ty * l; X[q + 2] = tz * l;
+        wx += X[q]; wy += X[q + 1]; wz += X[q + 2]; ws += s;
+      }
+      wx /= ws; wy /= ws; wz /= ws;
+      let px = 0, py = 0, pz = 0, cx = 0, cy = 0, cz = 0;
+      for (let j = 0; j < S; j++) {
+        const q = j * 3, s = Math.hypot(X[q], X[q + 1], X[q + 2]);
+        const sx = X[q] - s * wx, sy = X[q + 1] - s * wy, sz = X[q + 2] - s * wz;
+        X[q] = px; X[q + 1] = py; X[q + 2] = pz;
+        cx += px - MB[q] - (MA[q] - MB[q]) * e; cy += py - MB[q + 1] - (MA[q + 1] - MB[q + 1]) * e; cz += pz - MB[q + 2] - (MA[q + 2] - MB[q + 2]) * e;
+        px += sx; py += sy; pz += sz;
+      }
+      cx /= S; cy /= S; cz /= S;
+      for (let j = 0; j < S; j++) { const q = j * 3; X[q] -= cx; X[q + 1] -= cy; X[q + 2] -= cz; }
+    }
+    const X = new Float64Array(S * 3);
+    const tilt = 0.55;
+    const draw = (ctx, w, h) => {
+      const key = sel.value;
+      const A = (cache[key] ??= align(targets[key]));
+      const u = +sl.value, e = sstep(u);
+      const OLD = matched ? A.MB : A.naive;
+      if (matched) centreline(A.MA, A.MB, e, X);
+      else for (let k = 0; k < S * 3; k++) X[k] = A.naive[k] + (A.MA[k] - A.naive[k]) * e;
+      const sc = Math.min(w, h * 1.25) / 2.7, cx = w / 2, cy = h / 2;
+      const ca = Math.cos(tilt), sa = Math.sin(tilt);
+      const Pp = (arr, j) => [cx + arr[j * 3] * sc, cy + (arr[j * 3 + 2] * ca - arr[j * 3 + 1] * sa) * sc];
+      ctx.clearRect(0, 0, w, h);
+      const loop = (arr, n, stroke, lw, dash) => {
+        ctx.setLineDash(dash); ctx.strokeStyle = stroke; ctx.lineWidth = lw;
+        ctx.beginPath();
+        for (let j = 0; j <= n; j++) { const p = Pp(arr, j % n); j ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      };
+      // Which old point each new sample is paired with.
+      ctx.strokeStyle = css("--muted"); ctx.lineWidth = 0.8; ctx.globalAlpha = 0.7;
+      for (let j = 0; j < S; j += 4) { const p = Pp(OLD, j), q = Pp(A.MA, j); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      loop(A.oldFull, FINE, css("--muted"), 1.4, [5, 4]);
+      loop(A.newFull, FINE, css("--cyan"), 1.4, [5, 4]);
+      loop(X, S, css("--accent"), 3, []);
+      ctx.fillStyle = css("--accent");
+      for (let j = 0; j < S; j += 8) { const p = Pp(X, j); ctx.beginPath(); ctx.arc(p[0], p[1], 2.6, 0, TAU); ctx.fill(); }
+      ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+      ctx.fillStyle = css("--muted"); ctx.font = font(12);
+      ctx.fillText(matched ? "matched: angle map + blended directions" : "naive: sample j to sample j, positions blended", 4, h - 8);
+      ctx.fillText("hole axis", cx + 9, cy - 8);
+    };
+    const go = fitCanvas(c, (w) => (w < 560 ? 0.95 : 0.6), draw);
+    const setU = (u) => { sl.value = u; out.textContent = (+u).toFixed(2); go(); };
+    sl.addEventListener("input", () => setU(sl.value));
+    sel.addEventListener("change", go);
+    matchBtn.addEventListener("click", () => {
+      matched = !matched;
+      matchBtn.textContent = matched ? "Matched" : "Naive";
+      matchBtn.setAttribute("aria-pressed", String(matched));
+      go();
+    });
+    playBtn.addEventListener("click", () => {
+      if (+sl.value >= 1) setU(0);
+      playing = true;
+    });
+    // A morph takes 2 s, as in the sketch; started by hand, so it plays even with reduced motion.
+    animate(c, () => playing, (dt) => {
+      const u = Math.min(1, +sl.value + dt / 2);
+      setU(u);
+      if (u >= 1) playing = false;
+    });
+  }
+
+  /* ---------- Accumulation: the reflection pass's jitter and resolve ---------- */
+  {
+    const c = $("accCanvas"), sl = $("accFrames"), out = $("accFramesOut"), btn = $("accMove");
+    let moving = false;
+    const GW = 112, GH = 72;
+    const stripes = (u, v) => (Math.sin(17 * (u + 0.14 * Math.sin(5.5 * v + 2.2 * u)) + 5 * v * v) > 0.25 ? 1 : 0);
+    const sample = (i, j, frame) => {
+      const fx = i + 0.5, fy = j + 0.5;
+      const gx = fx * 0.06711056 + fy * 0.00583715, gy = (fx + 47) * 0.06711056 + (fy + 17) * 0.00583715;
+      const fr = (x) => x - Math.floor(x);
+      const xi0 = fr(fr(52.9829189 * fr(gx)) + frame * 0.7548777), xi1 = fr(fr(52.9829189 * fr(gy)) + frame * 0.5698403);
+      const u = i / GW, v = j / GH;
+      const spread = 0.003 + 0.05 * u;
+      const a = TAU * xi1, r = spread * Math.sqrt(xi0);
+      return stripes(u + r * Math.cos(a), v + r * Math.sin(a) * (GW / GH));
+    };
+    const single = new Float32Array(GW * GH), acc = new Float32Array(GW * GH);
+    const compute = () => {
+      const F = +sl.value, cap = moving ? 16 : 64;
+      acc.fill(0);
+      let n = 0;
+      for (let f = 0; f < F; f++) {
+        n = Math.min(n + 1, cap);
+        for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+          const k = j * GW + i, cur = sample(i, j, f);
+          acc[k] += (cur - acc[k]) / n;
+          if (f === F - 1) single[k] = cur;
+        }
+      }
+      $("accLeft").textContent = F;
+      $("accN").textContent = n;
+    };
+    const paint = (buf) => {
+      const off = document.createElement("canvas");
+      off.width = GW; off.height = GH;
+      const o = off.getContext("2d"), img = o.createImageData(GW, GH);
+      const env = rgb("--env"), band = rgb("--accent");
+      for (let k = 0; k < GW * GH; k++) {
+        const col = mixc(env, band, buf[k]);
+        img.data[k * 4] = col[0]; img.data[k * 4 + 1] = col[1]; img.data[k * 4 + 2] = col[2]; img.data[k * 4 + 3] = 255;
+      }
+      o.putImageData(img, 0, 0);
+      return off;
+    };
+    const draw = (ctx, w, h) => {
+      const stacked = w < 560, gapPx = 14;
+      const pw = stacked ? w : (w - gapPx) / 2, ph = (pw * GH) / GW;
+      ctx.clearRect(0, 0, w, h);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(paint(single), 0, 0, pw, ph);
+      ctx.drawImage(paint(acc), stacked ? 0 : pw + gapPx, stacked ? ph + gapPx : 0, pw, ph);
+      ctx.imageSmoothingEnabled = true;
+    };
+    const aspect = (w) => {
+      const stacked = w < 560, pw = stacked ? w : (w - 14) / 2, ph = (pw * GH) / GW;
+      return (stacked ? 2 * ph + 14 : ph) / w;
+    };
+    compute();
+    const go = fitCanvas(c, aspect, draw);
+    sl.addEventListener("input", () => { out.textContent = sl.value; compute(); go(); });
+    btn.addEventListener("click", () => {
+      moving = !moving;
+      btn.textContent = moving ? "Moving: up to 16" : "Still: up to 64";
+      btn.setAttribute("aria-pressed", String(moving));
+      compute(); go();
+    });
+  }
+
+  /* ---------- Thin film: thinFilm() at index 2.0 ---------- */
+  {
+    const c = $("filmCanvas"), sel = $("filmPal"), ang = $("filmAng"), out = $("filmAngOut");
+    const IOR = 2.0;
+    const PAL = [
+      { name: "purple-cyan", film: [278, 326], lambda: [650, 520, 470], power: 2.4 },
+      { name: "gold-green", film: [203, 238], lambda: [650, 532, 450], power: 1 },
+      { name: "pink-orange", film: [95, 135], lambda: [650, 532, 450], power: 1 },
+    ];
+    const thinFilm = (d, ndv, lam, out) => {
+      const sinT2 = (1 - ndv * ndv) / (IOR * IOR), cosT = Math.sqrt(Math.max(1 - sinT2, 0));
+      for (let k = 0; k < 3; k++) out[k] = clamp(0.5 + 0.5 * Math.cos((TAU * 2 * IOR * d * cosT) / lam[k] + Math.PI), 0, 1);
+      return out;
+    };
+    const tmp = [0, 0, 0];
+    const show = (pal, d, deg) => {
+      thinFilm(d, Math.cos((deg * Math.PI) / 180), pal.lambda, tmp);
+      return tmp.map((x) => 255 * Math.pow(Math.pow(Math.max(x, 1e-7), pal.power), 1 / 2.2));
+    };
+    const MAXD = 400, MAXA = 80;
+    let mapCache = null;
+    const mapImage = (pal) => {
+      if (mapCache && mapCache.pal === pal) return mapCache.img;
+      const MW = 400, MH = 160, off = document.createElement("canvas");
+      off.width = MW; off.height = MH;
+      const o = off.getContext("2d"), img = o.createImageData(MW, MH);
+      for (let j = 0; j < MH; j++) for (let i = 0; i < MW; i++) {
+        const col = show(pal, ((i + 0.5) / MW) * MAXD, ((j + 0.5) / MH) * MAXA), k = (j * MW + i) * 4;
+        img.data[k] = col[0]; img.data[k + 1] = col[1]; img.data[k + 2] = col[2]; img.data[k + 3] = 255;
+      }
+      o.putImageData(img, 0, 0);
+      mapCache = { pal, img: off };
+      return off;
+    };
+    const draw = (ctx, w, h) => {
+      const pal = PAL[+sel.value], deg = +ang.value;
+      const rowH = 22, block = 26 + 10 + 3 * (rowH + 20), left = 38, right = 8, top = 6, mapH = Math.max(60, h - top - block), plotW = w - left - right;
+      const X = (d) => left + (d / MAXD) * plotW;
+      ctx.clearRect(0, 0, w, h);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(mapImage(pal), left, top, plotW, mapH);
+      const ink = css("--ink"), muted = css("--muted");
+      ctx.font = font(11);
+      ctx.fillStyle = muted;
+      ctx.textAlign = "right";
+      for (const a of [0, 40, 80]) ctx.fillText(a + "°", left - 6, top + (a / MAXA) * mapH + (a === 0 ? 10 : a === 80 ? -2 : 4));
+      // Chosen angle.
+      const ya = top + (deg / MAXA) * mapH;
+      ctx.strokeStyle = css("--panel"); ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(left, ya); ctx.lineTo(left + plotW, ya); ctx.stroke();
+      ctx.strokeStyle = ink; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(left, ya); ctx.lineTo(left + plotW, ya); ctx.stroke();
+      // Window of the palette shown in the map.
+      ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      ctx.strokeRect(X(pal.film[0]), top + 0.5, X(pal.film[1]) - X(pal.film[0]), mapH - 1);
+      ctx.setLineDash([]);
+      // Thickness axis.
+      const ay = top + mapH + 16;
+      ctx.textAlign = "center"; ctx.fillStyle = muted;
+      for (let d = 0; d <= MAXD; d += 100) {
+        ctx.fillText(String(d), clamp(X(d), left + 8, left + plotW - 10), ay);
+        ctx.fillRect(X(d) - 0.5, top + mapH, 1, 4);
+      }
+      ctx.textAlign = "right";
+      ctx.fillText("nm", left - 6, ay);
+      // One strip per palette at the chosen angle, full range faint and the window at full strength.
+      const rows = ay + 10;
+      PAL.forEach((p, r) => {
+        const y = rows + r * (rowH + 20) + 14;
+        ctx.textAlign = "left"; ctx.fillStyle = p === pal ? ink : muted; ctx.font = font(11, p === pal ? 600 : 400);
+        ctx.fillText(`${p.name}  ${p.film[0]}–${p.film[1]} nm`, left, y - 4);
+        const steps = Math.max(2, Math.round(plotW));
+        for (let i = 0; i < steps; i++) {
+          const d = ((i + 0.5) / steps) * MAXD, inside = d >= p.film[0] && d <= p.film[1];
+          const col = show(p, d, deg);
+          ctx.fillStyle = `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${inside ? 1 : 0.28})`;
+          ctx.fillRect(left + (i / steps) * plotW, y, plotW / steps + 0.6, rowH);
+        }
+        ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+        ctx.strokeRect(X(p.film[0]), y - 0.5, X(p.film[1]) - X(p.film[0]), rowH + 1);
+      });
+      ctx.textAlign = "left";
+    };
+    const go = fitCanvas(c, (w) => (w * (w < 560 ? 0.6 : 0.3) + 170) / w, draw);
+    sel.addEventListener("change", go);
+    ang.addEventListener("input", () => { out.textContent = ang.value + "°"; go(); });
+  }
+})();
+</script>
+
+</body></html>

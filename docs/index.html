@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Codevember 2026 — Two Sets</title>
+  <style>
+    *{box-sizing:border-box}
+    :root{--paper:#f4f1e8;--ink:#161513;--muted:#716a5d;--line:#d9d1c2;--card:#fffdf8}
+    html,body{margin:0;background:var(--paper);color:var(--ink)}
+    body{font-family:"Inter","Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;line-height:1.5}
+    .page{max-width:1180px;margin:0 auto;padding:56px 28px 48px}
+    .eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+    h1{font-size:clamp(38px,6vw,76px);line-height:.94;letter-spacing:-.04em;margin:18px 0 20px;max-width:900px}
+    .lead{max-width:760px;color:var(--muted);font-size:16px;margin:0 0 42px}
+    .lead a{color:var(--ink);text-underline-offset:3px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 2px 0 rgba(22,21,19,.04)}
+    .cover{aspect-ratio:16/10;background:#111;overflow:hidden}
+    .cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s}
+    .card:hover .cover img{transform:scale(1.035)}
+    .body{padding:24px 24px 26px;display:flex;flex-direction:column;flex:1}
+    .top{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+    h2{font-size:30px;line-height:1;margin:0;letter-spacing:-.03em}
+    .days{font-size:13px;color:var(--muted);white-space:nowrap}
+    .author{margin:10px 0 0;color:var(--muted);font-size:14px}
+    .copy{margin:18px 0 0;font-size:15px;color:#2d2a24;max-width:520px}
+    .facts{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0;padding:0;list-style:none}
+    .facts li{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);background:#faf8f2}
+    .actions{margin-top:auto;padding-top:26px;display:flex;gap:10px;flex-wrap:wrap}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 16px;border-radius:999px;text-decoration:none;font-size:14px;font-weight:600;border:1px solid var(--ink);color:var(--ink);transition:.2s}
+    .btn:hover{background:var(--ink);color:var(--paper)}
+    .btn.primary{background:var(--ink);color:var(--paper)}
+    .btn.primary:hover{background:#000}
+    .foot{margin-top:35px;padding-top:20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:12px}
+    .foot a{color:var(--muted)}
+    @media(max-width:760px){.page{padding:34px 18px 30px}.grid{grid-template-columns:1fr}h1{font-size:42px}.lead{font-size:15px}.foot{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">Codevember 2026 · parallel archive</p>
+    <h1>Two complete sets,<br>kept together.</h1>
+    <p class="lead">Spite’s 25-day run and Theo Tillberg’s 16-piece run, moved out of the link list and into their own repository beside <a href="https://github.com/bear20252026/nodevember">Nodevember</a>. Full source, MIT, no Nodevember storage taken.</p>
+
+    <section class="grid" aria-label="The two sets">
+      <article class="card">
+        <div class="cover"><img src="./assets/spite.jpg" alt="Spite Codevember 2026 cover"></div>
+        <div class="body">
+          <div class="top"><h2>Spite</h2><span class="days">25 days</span></div>
+          <p class="author">@spite · one real-time three.js sketch per day</p>
+          <p class="copy">A photographic look across the whole run: PBR materials, soft shadows, AO, a bounce of GI, AgX tonemapping and physical motion.</p>
+          <ul class="facts"><li>~85 MB</li><li>MIT</li><li>WebGL 2</li><li>25 folders</li></ul>
+          <div class="actions">
+            <a class="btn primary" href="./spite/">打开整套 ↗</a>
+            <a class="btn" href="https://github.com/bear20252026/codevember-sets/tree/main/spite">源码</a>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="cover"><img src="./assets/theo.png" alt="Theo Tillberg Codevember 2026 cover"></div>
+        <div class="body">
+          <div class="top"><h2>Theo Tillberg</h2><span class="days">16 pieces</span></div>
+          <p class="author">@theo_t · one mini project per available day</p>
+          <p class="copy">Sixteen pieces across the month: WebGPU games, folded paper, shaders and small worlds, built as separate Vite projects.</p>
+          <ul class="facts"><li>~292 MB repo</li><li>MIT</li><li>WebGPU / WebGL</li><li>16 folders</li></ul>
+          <div class="actions">
+            <a class="btn primary" href="./theo/">打开整套 ↗</a>
+            <a class="btn" href="https://github.com/bear20252026/codevember-sets/tree/main/theo">源码</a>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <footer class="foot">
+      <span>Original works by <a href="https://github.com/spite">@spite</a> and <a href="https://x.com/theo_t">@theo_t</a>. Both MIT; source and licence kept in each folder.</span>
+      <span><a href="https://github.com/bear20252026/codevember-sets">GitHub</a> · <a href="https://bear20252026.github.io/nodevember/">Nodevember ↗</a></span>
+    </footer>
+  </main>
+</body>
+</html>

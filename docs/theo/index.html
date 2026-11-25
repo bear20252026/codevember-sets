@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codevember 2026</title>
+  <meta name="author" content="Theo Tillberg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@700&family=Inter:wght@400;600&display=swap" />
+  <style>
+    /* the days' title block (08, 09, 12): heavy Plex capitals, Helvetica caps under it */
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: #fff; color: #1c1c1c; font: 13px/1.4 Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    main { max-width: 1200px; margin: 0 auto; }
+    a { color: inherit; }
+    h1 {
+      margin: 0; white-space: nowrap;
+      font: 700 56px/0.9 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      letter-spacing: -0.02em; text-transform: uppercase;
+    }
+    .caps { font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+    .sub { margin: 6px 0 32px; font-size: 14px; line-height: 1.15; }
+    .sub a, footer a { text-decoration: none; }
+    .ico { width: 0.85em; height: 0.85em; margin-right: 0.3em; vertical-align: -0.08em; fill: currentColor; }
+    .sub a:hover, footer a:hover { text-decoration: underline; }
+    footer { margin-top: 32px; font-size: 14px; line-height: 1.15; }
+    /* edge to edge: half a hairline inside each square, so two neighbours make one line */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+    .sq { position: relative; aspect-ratio: 1; display: block; overflow: hidden; box-shadow: inset 0 0 0 0.5px #e4e4e4; text-decoration: none; }
+    .sq img, .sq video { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s ease; }
+    .sq:hover img, .sq:hover video { transform: scale(1.04); }
+    /* the day's title top left, in the sub line's caps */
+    .label {
+      position: absolute; top: 10px; left: 10px; right: 10px;
+      font-size: 14px; line-height: 1.15; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .ink-black .label { color: #1c1c1c; }
+    .ink-white .label { color: #f4f4f2; }
+    .sq.empty { color: #bbb; }
+    @media (max-width: 640px) {
+      body { padding: 16px; }
+      h1 { font-size: 36px; }
+      .sub { font-size: 10px; margin-bottom: 24px; }
+      footer { font-size: 10px; margin-top: 24px; }
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .label { top: 8px; left: 8px; right: 8px; font-size: 10px; }
+      /* a phone scrolls: only the days still to come stay as empty squares, the missed ones go */
+      .sq.empty.past, .sq.unlisted { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Codevember 2026</h1>
+    <p class="sub caps">15 of 30 days by Theo Tillberg · <a href="https://github.com/ttillberg/codevember-2026"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57l-.02-2.04c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49 1 .1-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3"/></svg>Source</a> · <a href="https://x.com/theo_t"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.4l-5.8-7.59-6.64 7.59H.47l8.6-9.83L0 1.15h7.6l5.24 6.93zm-1.29 19.5h2.04L6.49 3.24H4.3z"/></svg>@theo_t</a></p>
+    <div class="grid">
+      <div class="sq empty unlisted" data-date="2026-11-01"><span class="label">01 Fold</span></div>
+      <a class="sq has-img ink-white" href="./02/" title="WebGPU Diamond Cutter game: slice rising colored gemstones in 3D across 1,000 deterministic levels, dodge obsidian Black Diamonds, and watch severed halves shatter into refractive shards over dispersive floor caustics"><img src="./02/screengrab.png" alt="" loading="lazy" /><span class="label">02 Shatter</span></a>
+      <div class="sq empty" data-date="2026-11-03"><span class="label">03 Melt</span></div>
+      <a class="sq has-img ink-white" href="./04/" title="Drone timelapse of a stroad junction, its traffic simulated car by car"><video src="./04/screengrab.mp4" poster="./04/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">04 Tangle</span></a>
+      <a class="sq has-img ink-black" href="./05/" title="Paint five real mosses and lichens onto a rock or a letter"><video src="./05/screengrab.mp4" poster="./05/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">05 Moss</span></a>
+      <a class="sq has-img ink-white" href="./06/" title="A candy orrery"><video src="./06/screengrab.mp4" poster="./06/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">06 Orrery</span></a>
+      <a class="sq has-img ink-black" href="./07/" title="Paint on a hollow balloon"><video src="./07/screengrab.mp4" poster="./07/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">07 Hollow</span></a>
+      <a class="sq has-img ink-black" href="./08/" title="A hypercube built for real, on telescopic struts"><video src="./08/screengrab.mp4" poster="./08/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">08 Tesseract</span></a>
+      <a class="sq has-img ink-black" href="./09/" title="Cut and peel two thin films off a human eye"><video src="./09/screengrab.mp4" poster="./09/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">09 Membrane</span></a>
+      <div class="sq empty" data-date="2026-11-10"><span class="label">10 Caustic</span></div>
+      <div class="sq empty" data-date="2026-11-11"><span class="label">11 Rust</span></div>
+      <a class="sq has-img ink-white" href="./12/" title="A rigged hummingbird, perched, with iridescent feathers"><video src="./12/screengrab.mp4" poster="./12/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">12 Feather</span></a>
+      <div class="sq empty" data-date="2026-11-13"><span class="label">13 Labyrinth</span></div>
+      <a class="sq has-img ink-white" href="./14/" title="One string the height of the screen, a live instrument always on the scale: pluck it, strum it, slide it"><video src="./14/screengrab.mp4" poster="./14/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">14 Tension</span></a>
+      <div class="sq empty" data-date="2026-11-15"><span class="label">15 Mirage</span></div>
+      <a class="sq has-img ink-black" href="./16/" title="Crawl over an endless moss carpet at dusk with a worm's eye and throw spores: mushrooms grow in timelapse"><video src="./16/screengrab.mp4" poster="./16/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">16 Spore</span></a>
+      <div class="sq empty" data-date="2026-11-17"><span class="label">17 Kelp</span></div>
+      <a class="sq has-img ink-white" href="./18/" title="A chain of swinging arms as a drum machine: every joint ticks where it crosses the centre line, a Fourier sum heard as rhythm"><video src="./18/screengrab.mp4" poster="./18/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">18 Pendulum</span></a>
+      <a class="sq has-img ink-black" href="./19/" title="A cube of layered sandstone with a lake on it and bones in it, worn voxel by voxel: rain, wind, a hose, a scratch and dynamite, and what grows after"><video src="./19/screengrab.mp4" poster="./19/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">19 Erosion</span></a>
+      <a class="sq has-img ink-white" href="./20/" title="A preservation pod hanging by its cables in a hall: push it, pull its door, watch what drips"><video src="./20/screengrab.mp4" poster="./20/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">20 Cocoon</span></a>
+      <div class="sq empty" data-date="2026-11-21"><span class="label">21 Bolt</span></div>
+      <a class="sq has-img ink-white" href="./22/" title="A 1984 Swedish bedroom desk with a Commodore 64C, 1702 CRT, 1541 disk drive, and Suncom TAC-2 joystick running C64 BASIC V2 — write an echo program to set off fireworks"><video src="./22/screengrab.mp4" poster="./22/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">22 Echo</span></a>
+      <div class="sq empty" data-date="2026-11-23"><span class="label">23 Magma</span></div>
+      <a class="sq has-img ink-white" href="./24/" title="Eight snakes of eight species in a knot that holds, crawling through it"><video src="./24/screengrab.mp4" poster="./24/screengrab.png" autoplay muted loop playsinline preload="auto"></video><span class="label">24 Nest</span></a>
+      <div class="sq empty" data-date="2026-11-25"><span class="label">25 Veil</span></div>
+      <div class="sq empty" data-date="2026-11-26"><span class="label">26 Anamorph</span></div>
+      <div class="sq empty" data-date="2026-11-27"><span class="label">27 Burrow</span></div>
+      <div class="sq empty" data-date="2026-11-28"><span class="label">28 Hive</span></div>
+      <div class="sq empty" data-date="2026-11-29"><span class="label">29 Portal</span></div>
+      <div class="sq empty" data-date="2026-11-30"><span class="label">30 Dissolve</span></div>
+    </div>
+    <footer class="caps">Prompt list and initiative by <a href="https://x.com/thespite">@thespite</a></footer>
+  </main>
+  <script>
+    // an empty day before today is a missed one (marked here, not at build time, so it stays right between deploys)
+    const d = new Date();
+    const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    for (const sq of document.querySelectorAll('.sq.empty[data-date]')) sq.classList.toggle('past', sq.dataset.date < today);
+  </script>
+</body>
+</html>
