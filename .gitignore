@@ -1,4 +1,5 @@
 site/
+docs/
 node_modules/
 theo/node_modules/
 theo/dist/
