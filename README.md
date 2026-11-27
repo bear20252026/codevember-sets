@@ -38,7 +38,7 @@ The default base remains upstream when the variable is unset.
 
 ## Publishing
 
-GitHub Pages is deployed from the `site/` artifact by `.github/workflows/pages.yml`. The workflow type-checks Theo, builds `theo/dist`, assembles `site/`, smoke-tests all page roots and local links, then publishes. `docs/` is no longer the deployment source.
+GitHub Pages currently builds from `main / docs`. A Pages workflow for the `site/` artifact is prepared but not yet enabled; once the `workflow` scope is granted, it will type-check Theo, build `theo/dist`, assemble `site/`, smoke-test all page roots and local links, then publish. After that, `docs/` can be retired.
 
 No build is needed for Das Prinzip: the pages are already self-contained. They load `three@0.186.1` from jsDelivr, so the live pages need network access for the Three.js modules.
 
