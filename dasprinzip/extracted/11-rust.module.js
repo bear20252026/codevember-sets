@@ -1,0 +1,1711 @@
+import * as THREE from 'three/webgpu';
+import {
+  Fn, uniform, uniformArray, float, vec2, vec3, vec4, color, attribute, Loop, If, Break,
+  dot, cross, normalize, mix, smoothstep, max, min, abs, fract, floor, length, pow, exp, sign, select, clamp,
+  sin, cos, atan, acos, texture, log2, frontFacing, uv, step, instanceIndex, tanh, sqrt, dFdx, dFdy, positionLocal, positionView, normalView, screenUV,
+  pass, convertToTexture, perspectiveDepthToViewZ
+} from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+
+const BUILD = 'v1.2-softer-flash';
+console.log('%c' + BUILD, 'color:#9fc4ff');
+
+////////////////////////////////////////////////////////////////
+//// PARAMS
+////////////////////////////////////////////////////////////////
+
+const QS = new URLSearchParams(location.search);
+const LOWQ = QS.has('low') || /Android|iPhone|iPad/i.test(navigator.userAgent);
+const R = 0.28;
+const NH = 24;
+
+const LOOKS = { paint: 0, patina: 1, black: 2, mint: 3 };
+const LOOK0 = LOOKS[QS.get('look')] ?? 0;
+const uLook = uniform(LOOK0 === 1 ? 1 : 0);
+const uWear = uniform(QS.get('wear') === 'light' ? 0.25 : 0.75);
+const uRes = uniform(new THREE.Vector2(1, 1));
+const uTime = uniform(0);
+const uSpin = uniform(0);
+const uCamPos = uniform(new THREE.Vector3());
+const uInvProj = uniform(new THREE.Matrix4());
+const uCamWorld = uniform(new THREE.Matrix4());
+const uNear = uniform(0.05), uFar = uniform(30);
+const uHits = uniformArray(Array.from({ length: NH }, () => new THREE.Vector4(0, 0, 0, 0)), 'vec4');
+
+////////////////////////////////////////////////////////////////
+//// NOISE
+////////////////////////////////////////////////////////////////
+
+const hash13 = Fn(([q]) => {
+  const p3 = fract(q.mul(0.1031)).toVar();
+  p3.addAssign(dot(p3, p3.zyx.add(31.32)));
+  return fract(p3.x.add(p3.y).mul(p3.z));
+}).setLayout({ name: 'h13', type: 'float', inputs: [{ name: 'q', type: 'vec3' }] });
+
+const vn = Fn(([x]) => {
+  const i = floor(x);
+  const f = fract(x);
+  const u = f.mul(f).mul(f.mul(-2.0).add(3.0));
+  const a = hash13(i);
+  const b = hash13(i.add(vec3(1, 0, 0)));
+  const c = hash13(i.add(vec3(0, 1, 0)));
+  const d = hash13(i.add(vec3(1, 1, 0)));
+  const e = hash13(i.add(vec3(0, 0, 1)));
+  const g = hash13(i.add(vec3(1, 0, 1)));
+  const h = hash13(i.add(vec3(0, 1, 1)));
+  const k = hash13(i.add(vec3(1, 1, 1)));
+  const z0 = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  const z1 = mix(mix(e, g, u.x), mix(h, k, u.x), u.y);
+  return mix(z0, z1, u.z).mul(2.0).sub(1.0);
+}).setLayout({ name: 'vn', type: 'float', inputs: [{ name: 'x', type: 'vec3' }] });
+
+const fbm4 = Fn(([p]) => {
+  const v = vn(p).mul(0.5).toVar();
+  v.addAssign(vn(p.mul(2.03).add(vec3(1.7, 9.2, 3.1))).mul(0.25));
+  v.addAssign(vn(p.mul(4.01).add(vec3(8.3, 2.8, 6.4))).mul(0.125));
+  v.addAssign(vn(p.mul(8.05).add(vec3(4.1, 7.7, 1.9))).mul(0.0625));
+  return v;
+}).setLayout({ name: 'fbm4', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+
+const fbm3 = Fn(([p]) => {
+  const v = vn(p).mul(0.55).toVar();
+  v.addAssign(vn(p.mul(2.11).add(vec3(5.3, 1.2, 8.8))).mul(0.3));
+  v.addAssign(vn(p.mul(4.37).add(vec3(2.6, 6.1, 3.3))).mul(0.15));
+  return v;
+}).setLayout({ name: 'fbm3', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+
+// long thin scratches: noise stretched hard along one axis
+const scratchSet = Fn(([p, ax, ay, freq]) => {
+  const az = cross(ax, ay);
+  const q = vec3(dot(p, ax), dot(p, ay), dot(p, az));
+  const l = vn(vec3(q.x.mul(1.3), q.y.mul(freq), q.z.mul(1.3)));
+  const line = smoothstep(0.11, 0.02, abs(l));
+  const gate = smoothstep(0.1, 0.55, vn(q.mul(vec3(1.5, 4.0, 1.5)).add(17.0)));
+  return line.mul(gate);
+}).setLayout({ name: 'scr', type: 'float', inputs: [{ name: 'p', type: 'vec3' }, { name: 'ax', type: 'vec3' }, { name: 'ay', type: 'vec3' }, { name: 'freq', type: 'float' }] });
+
+////////////////////////////////////////////////////////////////
+//// SHADER BALL : PROFILE
+////////////////////////////////////////////////////////////////
+
+// corners [r, z, bevel]; bevel 0 = pass-through sample
+const bevelPath = (C, closed) => {
+  const out = [];
+  const n = C.length;
+  for (let i = 0; i < n; i++) {
+    const [r, z, b] = C[i];
+    if (!b || (!closed && (i === 0 || i === n - 1))) { out.push({ r, z, k: 0 }); continue; }
+    const A = C[(i - 1 + n) % n], D = C[(i + 1) % n];
+    let d1r = r - A[0], d1z = z - A[1]; const l1 = Math.hypot(d1r, d1z); d1r /= l1; d1z /= l1;
+    let d2r = D[0] - r, d2z = D[1] - z; const l2 = Math.hypot(d2r, d2z); d2r /= l2; d2z /= l2;
+    const bb = Math.min(b, l1 * 0.45, l2 * 0.45);
+    const p1 = [r - d1r * bb, z - d1z * bb], p2 = [r + d2r * bb, z + d2z * bb];
+    const sg = Math.sign(d1r * d2z - d1z * d2r);
+    const S = 8;
+    for (let s = 0; s <= S; s++) {
+      const t = s / S, a = (1 - t) * (1 - t), m = 2 * (1 - t) * t, c = t * t;
+      out.push({ r: a * p1[0] + m * r + c * p2[0], z: a * p1[1] + m * z + c * p2[1], k: s === S / 2 ? sg : 0 });
+    }
+  }
+  // subdivide long segments so the edge attribute interpolates smoothly
+  const fine = [];
+  const m = closed ? out.length : out.length - 1;
+  for (let i = 0; i < m; i++) {
+    const a = out[i], b = out[(i + 1) % out.length];
+    const L = Math.hypot(b.r - a.r, b.z - a.z);
+    const N = Math.max(1, Math.ceil(L / 0.008));
+    fine.push(a);
+    for (let j = 1; j < N; j++) fine.push({ r: a.r + (b.r - a.r) * j / N, z: a.z + (b.z - a.z) * j / N, k: 0 });
+  }
+  if (!closed) fine.push(out[out.length - 1]);
+  // arclength, normals, edge (+ convex lip, - concave crease)
+  const P = fine.length;
+  let s = 0;
+  fine.forEach((p, i) => { if (i) s += Math.hypot(p.r - fine[i - 1].r, p.z - fine[i - 1].z); p.s = s; });
+  const total = closed ? s + Math.hypot(fine[0].r - fine[P - 1].r, fine[0].z - fine[P - 1].z) : s;
+  const corners = fine.filter((p) => p.k !== 0);
+  fine.forEach((p, i) => {
+    const a = fine[closed ? (i - 1 + P) % P : Math.max(0, i - 1)];
+    const b = fine[closed ? (i + 1) % P : Math.min(P - 1, i + 1)];
+    let tr = b.r - a.r, tz = b.z - a.z; const tl = Math.hypot(tr, tz) || 1; tr /= tl; tz /= tl;
+    p.nr = tz; p.nz = -tr;
+    let e = 0;
+    corners.forEach((c) => {
+      let d = Math.abs(p.s - c.s);
+      if (closed) d = Math.min(d, total - d);
+      e += c.k * Math.exp(-(d * d) / (0.012 * 0.012));
+    });
+    p.e = Math.max(-1, Math.min(1, e));
+  });
+  if (!closed && fine[0].r < 1e-4) { fine[0].nr = 0; fine[0].nz = -1; }
+  if (!closed && fine[P - 1].r < 1e-4) { fine[P - 1].nr = 0; fine[P - 1].nz = 1; }
+  return { pts: fine, total };
+};
+
+const sphereArc = (zEnd, n) => {
+  const out = [];
+  const a1 = Math.asin(zEnd);
+  for (let i = 0; i <= n; i++) {
+    const a = -Math.PI / 2 + (a1 + Math.PI / 2) * i / n;
+    out.push([Math.cos(a), Math.sin(a), 0]);
+  }
+  return out;
+};
+
+const domeArc = (r0, z0, h, n) => {
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const r = r0 * (1 - i / n);
+    out.push([r, z0 + h * (1 - (r / r0) ** 2), 0]);
+  }
+  return out;
+};
+
+const Z0 = 0.12;
+const bodyCorners = [
+  ...sphereArc(Z0, 140).slice(0, -1),
+  [Math.sqrt(1 - Z0 * Z0), Z0, 0.012],
+  [0.952, Z0, 0.006],
+  [0.952, 0.17, 0.005],
+  [0.80, 0.17, 0.005],
+  [0.80, 0.50, 0.006],
+  [0.80, 0.525, 0.012],
+  [0.772, 0.585, 0.03],
+  [0.722, 0.585, 0.008],
+  [0.722, 0.552, 0.005],
+  [0.692, 0.552, 0.005],
+  [0.692, 0.675, 0.01],
+  [0.668, 0.702, 0.012],
+  [0.638, 0.702, 0.004],
+  [0.632, 0.694, 0.003],
+  [0.612, 0.694, 0.003],
+  ...domeArc(0.612, 0.694, 0.05, 24),
+];
+const ringCorners = [
+  [0.806, 0.17, 0.006],
+  [0.948, 0.17, 0.006],
+  [0.958, 0.25, 0.0],
+  [0.948, 0.32, 0.0],
+  [0.925, 0.39, 0.0],
+  [0.892, 0.445, 0.012],
+  [0.84, 0.452, 0.012],
+  [0.806, 0.452, 0.008],
+];
+
+////////////////////////////////////////////////////////////////
+//// SHADER BALL : LATHE
+////////////////////////////////////////////////////////////////
+
+const lathe = (prof, phis, closedProf, capEnds) => {
+  const { pts } = prof;
+  const np = pts.length;
+  const pos = [], nor = [], edg = [], idx = [];
+  const phi0 = phis[0], phi1 = phis[phis.length - 1];
+  phis.forEach((phi) => {
+    const c = Math.cos(phi), s = Math.sin(phi);
+    pts.forEach((p) => {
+      pos.push(p.r * c, p.r * s, p.z);
+      nor.push(p.nr * c, p.nr * s, p.nz);
+      let e = p.e;
+      if (capEnds) {
+        const d = Math.min(Math.abs(phi - phi0), Math.abs(phi1 - phi)) * p.r;
+        e = Math.max(e, Math.exp(-(d * d) / (0.012 * 0.012)));
+      }
+      edg.push(e);
+    });
+  });
+  const m = closedProf ? np : np - 1;
+  for (let j = 0; j < phis.length - 1; j++) {
+    for (let i = 0; i < m; i++) {
+      const a = j * np + i, b = (j + 1) * np + i, c = j * np + (i + 1) % np, d = (j + 1) * np + (i + 1) % np;
+      idx.push(a, b, c, c, b, d);
+    }
+  }
+  if (capEnds) {
+    // fan of shrinking loops toward the centroid; edge fades inwards
+    let cr = 0, cz = 0;
+    pts.forEach((p) => { cr += p.r; cz += p.z; });
+    cr /= np; cz /= np;
+    const loops = [1, 0.94, 0.86, 0.7, 0.4, 0.0];
+    [[phi0, -1], [phi1, 1]].forEach(([phi, sg]) => {
+      const c = Math.cos(phi), s = Math.sin(phi);
+      const tx = -s * sg, ty = c * sg;
+      const base = pos.length / 3;
+      loops.forEach((f) => {
+        pts.forEach((p) => {
+          const r = cr + (p.r - cr) * f, z = cz + (p.z - cz) * f;
+          pos.push(r * c, r * s, z);
+          nor.push(tx, ty, 0);
+          const dd = (1 - f) * 0.07;
+          edg.push(Math.exp(-(dd * dd) / (0.012 * 0.012)));
+        });
+      });
+      for (let L = 0; L < loops.length - 1; L++) {
+        for (let i = 0; i < np; i++) {
+          const a = base + L * np + i, b = base + L * np + (i + 1) % np;
+          const c2 = base + (L + 1) * np + i, d = base + (L + 1) * np + (i + 1) % np;
+          idx.push(a, b, c2, b, d, c2);
+        }
+      }
+    });
+  }
+  // orient every triangle to its vertex normals
+  for (let t = 0; t < idx.length; t += 3) {
+    const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]];
+    const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+    const ux = pos[b * 3] - ax, uy = pos[b * 3 + 1] - ay, uz = pos[b * 3 + 2] - az;
+    const vx = pos[c * 3] - ax, vy = pos[c * 3 + 1] - ay, vz = pos[c * 3 + 2] - az;
+    const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+    const nx = nor[a * 3] + nor[b * 3] + nor[c * 3], ny = nor[a * 3 + 1] + nor[b * 3 + 1] + nor[c * 3 + 1], nz = nor[a * 3 + 2] + nor[b * 3 + 2] + nor[c * 3 + 2];
+    if (gx * nx + gy * ny + gz * nz < 0) { idx[t + 1] = c; idx[t + 2] = b; }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('aEdge', new THREE.Float32BufferAttribute(edg, 1));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+};
+
+const SEG = LOWQ ? 160 : 256;
+const fullPhis = Array.from({ length: SEG + 1 }, (_, i) => (i / SEG) * Math.PI * 2);
+const NOTCH = 2.35, GAP = 0.085;
+const arcPhis = (a0, a1, n) => Array.from({ length: n + 1 }, (_, i) => {
+  const t = i / n;
+  const w = t - Math.sin(Math.PI * 2 * t) / (Math.PI * 2) * 0.88;
+  return a0 + (a1 - a0) * w;
+});
+const bodyGeo = lathe(bevelPath(bodyCorners, false), fullPhis, false, false);
+const ringProf = bevelPath(ringCorners, true);
+const ringGeoA = lathe(ringProf, arcPhis(NOTCH + GAP / 2, NOTCH + Math.PI - GAP / 2, SEG / 2), true, true);
+const ringGeoB = lathe(ringProf, arcPhis(NOTCH + Math.PI + GAP / 2, NOTCH + Math.PI * 2 - GAP / 2, SEG / 2), true, true);
+
+////////////////////////////////////////////////////////////////
+//// RENDERER
+////////////////////////////////////////////////////////////////
+
+const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: QS.has('webgl') });
+const PR = Math.min(window.devicePixelRatio, LOWQ ? 1.5 : 2) * (parseFloat(QS.get('scale')) || 1);
+renderer.setPixelRatio(PR);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+document.body.appendChild(renderer.domElement);
+await renderer.init();
+
+const camera = new THREE.PerspectiveCamera(37, window.innerWidth / window.innerHeight, 0.05, 30);
+const CAM0 = new THREE.Vector3(0.6, 0.85, 1.2), LOOK = new THREE.Vector3(0, -0.05, 0);
+camera.position.copy(CAM0);
+camera.lookAt(LOOK);
+
+////////////////////////////////////////////////////////////////
+//// STUDIO
+////////////////////////////////////////////////////////////////
+
+const scene = new THREE.Scene();
+const envScene = new THREE.Scene();
+const dome = new THREE.Mesh(new THREE.SphereGeometry(20, 32, 16), new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide }));
+dome.material.colorNode = mix(vec3(0.012, 0.016, 0.022), vec3(0.07, 0.075, 0.085), smoothstep(-0.7, 0.9, normalize(positionLocal).y));
+envScene.add(dome);
+const softbox = (w, h, p, c) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicNodeMaterial({ color: c, side: THREE.DoubleSide }));
+  m.position.copy(p);
+  m.lookAt(0, 0, 0);
+  envScene.add(m);
+};
+softbox(8, 3, new THREE.Vector3(0, 9, 1), new THREE.Color(7, 6.6, 6.2));
+softbox(9, 6, new THREE.Vector3(-6, 5, 7), new THREE.Color(1.5, 1.45, 1.4));
+softbox(2.2, 10, new THREE.Vector3(8, 1, -3), new THREE.Color(2.2, 2.0, 1.8));
+softbox(16, 16, new THREE.Vector3(0, -7, 0), new THREE.Color(0.06, 0.045, 0.035));
+softbox(4, 14, new THREE.Vector3(-3, -5, -5), new THREE.Color(0.4, 0.4, 0.45));
+softbox(4, 14, new THREE.Vector3(5, -5, 2), new THREE.Color(0.32, 0.32, 0.36));
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(envScene, 0.02).texture;
+scene.environmentIntensity = 0.75;
+
+// the plate's lamp hangs almost straight above the ball
+const LIGHT = new THREE.Vector3().copy(CAM0).add(new THREE.Vector3(-0.6, 1, -1));
+const key = new THREE.DirectionalLight(0xfff2e4, 2.2);
+key.position.copy(LIGHT).normalize().multiplyScalar(4);
+key.castShadow = true;
+key.shadow.mapSize.setScalar(LOWQ ? 1024 : 2048);
+key.shadow.camera.left = key.shadow.camera.bottom = -0.45;
+key.shadow.camera.right = key.shadow.camera.top = 0.45;
+key.shadow.camera.near = 2.5; key.shadow.camera.far = 6;
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.003;
+key.shadow.radius = 3;
+scene.add(key);
+const frontL = new THREE.DirectionalLight(0xe8ecf2, 0.9);
+frontL.position.set(-2, 1.5, 3);
+scene.add(frontL);
+// warm bounce from the glowing rings below
+const glowL = new THREE.DirectionalLight(0x3a8cff, 0.9);
+glowL.position.set(0.6, -2, 1.4);
+scene.add(glowL);
+
+////////////////////////////////////////////////////////////////
+//// MATERIAL
+////////////////////////////////////////////////////////////////
+
+const P = positionLocal.toVar();
+const aEdge = attribute('aEdge', 'float');
+const convex = aEdge.max(0.0).toVar();
+const concave = aEdge.negate().max(0.0).toVar();
+
+const nA = fbm4(P.mul(2.4)).toVar();
+const nB = fbm3(P.mul(7.5).add(11.0)).toVar();
+const nC = vn(P.mul(42.0)).toVar();
+const nD = fbm3(P.mul(16.0).add(3.0)).toVar();
+const nE = fbm3(P.mul(34.0).add(7.0)).toVar();
+// the flaking transition from Day11: the old skin crazes into cells, lifts
+// at a front that runs out from one spot, and comes off to show the new one
+const uProg = uniform(-1.0);
+const uFrom = uniform(LOOK0), uTo = uniform(LOOK0);
+const uSpot = uniform(new THREE.Vector3(0, 0, 1));
+const vn3 = (x) => vec3(vn(x), vn(x.add(vec3(17.1, 3.7, 9.2))), vn(x.add(vec3(-5.3, 11.9, 2.4))));
+const fAng = acos(clamp(dot(normalize(P), uSpot), -1.0, 1.0)).div(Math.PI);
+const pr = vec3(dot(P, vec3(0.62, 0.48, -0.62)), dot(P, vec3(-0.35, 0.87, 0.34)), dot(P, vec3(0.70, -0.08, 0.71)));
+const fq0 = pr.mul(12.0).add(vn3(pr.mul(2.4)).mul(1.6)).add(vn3(pr.mul(7.0).add(5.0)).mul(0.55)).toVar();
+const fq = fract(fq0);
+const e3 = min(fq, vec3(1.0).sub(fq));
+const border = min(e3.x, min(e3.y, e3.z)).toVar();
+const fr = hash13(floor(fq0).add(3.7));
+const fFront = fAng.add(fr.sub(0.5).mul(0.09)).add(vn(P.mul(2.2).add(31.0)).mul(0.05)).toVar();
+const rev = smoothstep(0.0, 0.002, uProg.sub(fFront)).toVar();
+const keep = float(1.0).sub(rev);
+const lift = smoothstep(uProg.add(0.07), uProg, fFront).mul(keep).toVar();
+const craze = smoothstep(uProg.add(0.16), uProg.add(0.02), fFront).mul(keep).mul(smoothstep(0.07, 0.0, border)).toVar();
+const fresh = smoothstep(uProg.sub(0.12), uProg, fFront).mul(rev).toVar();
+// weight of each of the four skins: the old one where the front hasn't passed, the new one behind it
+const wk = (k) => mix(select(uFrom.equal(k), float(1.0), float(0.0)), select(uTo.equal(k), float(1.0), float(0.0)), rev);
+const W = [0, 1, 2, 3].map((k) => wk(k).toVar());
+const blend4 = (a, b, c, d) => a.mul(W[0]).add(b.mul(W[1])).add(c.mul(W[2])).add(d.mul(W[3]));
+const fShade = float(1.0).sub(craze.mul(0.75)).sub(fresh.mul(0.35)).sub(lift.mul(smoothstep(0.12, 0.0, border)).mul(0.5));
+
+const scr = max(
+  scratchSet(P.mul(3.0), normalize(vec3(0.8, 0.6, 0.1)), normalize(vec3(-0.6, 0.8, 0.2)), float(80.0)),
+  scratchSet(P.mul(3.3).add(5.0), normalize(vec3(0.2, -0.3, 0.93)), normalize(vec3(0.95, 0.25, -0.1)), float(65.0)).mul(0.8)
+).toVar();
+
+// clicks chip the paint around the strike point
+let hitSum = float(0);
+for (let i = 0; i < NH; i++) {
+  const h = uHits.element(i);
+  const d = P.sub(h.xyz);
+  hitSum = hitSum.add(h.w.mul(exp(dot(d, d).mul(-120.0))));
+}
+const hit = hitSum.mul(smoothstep(-0.6, 0.4, nD.add(nC.mul(0.3)))).toVar();
+
+// ---- paint over steel ----
+const wear = nA.mul(0.62).add(nB.mul(0.34)).add(nD.mul(0.14)).add(nC.mul(0.02))
+  .add(convex.mul(0.85)).add(concave.mul(0.25)).add(scr.mul(0.04)).add(hit.mul(0.9)).toVar();
+const thr = mix(0.6, 0.12, uWear).toVar();
+const paintM = smoothstep(thr.add(0.018), thr.sub(0.018), wear).toVar();
+const fringe = smoothstep(thr.sub(0.08), thr, wear).mul(paintM).toVar();
+const rustRing = smoothstep(thr.add(0.14), thr.add(0.01), wear).mul(paintM.oneMinus()).mul(smoothstep(-0.3, 0.5, nB.add(nC.mul(0.4)))).toVar();
+
+const blue0 = mix(color(0x15324b), color(0x2a5372), smoothstep(-0.45, 0.45, nA.add(nD.mul(0.4))));
+const blue1 = mix(blue0, color(0x5b7f96), smoothstep(0.25, 0.75, nB.add(nD.mul(0.3))).mul(0.4));
+const blue = mix(blue1, color(0x91aebd), fringe.mul(fringe).mul(0.7)).mul(float(1.0).sub(concave.mul(0.55)));
+const steel0 = color(0x8d9092).mul(nC.mul(0.06).add(nD.mul(0.14)).add(0.9));
+const steel1 = mix(steel0, color(0x5a3a24), rustRing.mul(0.85));
+const steel = mix(steel1, color(0xc9cbcd), scr.mul(0.35));
+const pc0 = mix(steel, blue, paintM);
+const pc1 = mix(pc0, color(0x2a1c12), concave.mul(0.55).mul(smoothstep(-0.4, 0.4, nB)));
+const paintCol = mix(pc1, color(0x8f969a), scr.mul(paintM).mul(0.45));
+const paintRough = mix(mix(float(0.36), float(0.75), rustRing).add(nD.mul(0.1)).sub(scr.mul(0.12)), float(0.22).add(nB.mul(0.07)).add(fringe.mul(0.22)), paintM)
+  .add(concave.mul(0.3));
+const paintMetal = mix(mix(float(1.0), float(0.35), rustRing), float(0.0), paintM);
+const paintH = paintM.mul(0.003).add(fringe.mul(0.0008)).sub(scr.mul(0.0004)).add(nD.mul(0.0003)).add(rustRing.mul(0.0006));
+
+// ---- oxidised patina ----
+const grime = smoothstep(0.1, 0.65, nA.negate().add(concave.mul(0.8)).add(nD.mul(0.3)).add(uWear.mul(0.25))).toVar();
+const rust = smoothstep(0.5, 0.58, nB.mul(0.45).add(nD.mul(0.6)).add(nC.mul(0.12)).add(concave.mul(0.3)).add(uWear.mul(0.15)).add(hit.mul(0.6))).toVar();
+const b0 = mix(color(0xa7a59c), color(0xab9566), smoothstep(-0.1, 0.6, nA.add(nD.mul(0.3))).mul(0.6));
+const b1 = mix(b0, color(0x7f9178), smoothstep(0.05, 0.55, nB.sub(nA.mul(0.3))).mul(0.45));
+const b2 = mix(b1, color(0x8d7f8f), smoothstep(0.3, 0.8, nD.add(nC.mul(0.2))).mul(0.3));
+const speck = smoothstep(0.12, 0.4, nE.add(nD.mul(0.3)).add(grime.mul(0.2))).toVar();
+const b3 = mix(mix(b2, color(0x4c4636), grime.mul(0.6)), color(0x3d3a2c), speck.mul(0.55));
+const b4 = mix(b3, color(0x5c2c18), rust.mul(0.8));
+const patCol = mix(b4, color(0xd6d6cf), scr.mul(0.4).add(convex.mul(0.3)).min(1.0));
+const patRough = float(0.34).add(speck.mul(0.15)).add(nD.mul(0.1)).add(nC.mul(0.03)).add(grime.mul(0.2)).add(rust.mul(0.45)).sub(convex.mul(0.1)).sub(scr.mul(0.1));
+const patMetal = mix(float(1.0), float(0.25), rust);
+const patH = nD.mul(0.0005).add(rust.mul(0.0010)).sub(scr.mul(0.0003));
+const irid = smoothstep(-0.35, 0.35, nA.mul(0.7).add(nB.mul(0.5))).mul(rust.oneMinus()).mul(grime.mul(0.6).oneMinus());
+
+// ---- black paint over steel (third reference) ----
+// satin black that has worn through on every lip and ring to bright steel
+const wearK = nA.mul(0.5).add(nB.mul(0.4)).add(nD.mul(0.18)).add(nE.mul(0.08)).add(convex.mul(1.05)).add(concave.mul(0.15)).add(hit.mul(0.9));
+const thrK = mix(0.48, 0.06, uWear);
+const blkM = smoothstep(thrK.add(0.015), thrK.sub(0.015), wearK).toVar();
+const blkFr = smoothstep(thrK.sub(0.06), thrK, wearK).mul(blkM);
+const blk0 = mix(color(0x0e0f11), color(0x24272b), smoothstep(-0.5, 0.6, nA.add(nD.mul(0.4))));
+const blk = mix(blk0, color(0x3a3e43), blkFr.mul(0.6)).mul(float(1.0).sub(concave.mul(0.5)));
+const stK = mix(color(0x9a9ea2).mul(nD.mul(0.12).add(0.95)), color(0xd4d6d8), scr.mul(0.5));
+const blkCol = mix(mix(stK, blk, blkM), color(0x5d6267), scr.mul(blkM).mul(0.35));
+const blkRough = mix(float(0.24).add(nD.mul(0.08)).sub(scr.mul(0.1)), float(0.44).add(nB.mul(0.1)), blkM).add(concave.mul(0.2));
+const blkMetal = mix(float(1.0), float(0.0), blkM);
+const blkH = blkM.mul(0.003).add(blkFr.mul(0.0007)).sub(scr.mul(0.0003));
+
+// ---- mint paint over rusted iron (fourth reference) ----
+// chalky pale green, blotched pink, flaking to rust that has eaten every edge and groove
+const wearM = nA.mul(0.55).add(nB.mul(0.45)).add(nE.mul(0.12)).add(convex.mul(1.2)).add(concave.mul(0.9)).add(hit.mul(0.9));
+const thrM = mix(0.4, 0.0, uWear);
+const mintM = smoothstep(thrM.add(0.012), thrM.sub(0.012), wearM).toVar();
+const mintFr = smoothstep(thrM.sub(0.05), thrM, wearM).mul(mintM);
+const mn0 = mix(color(0x8fb093), color(0xbcbca4), smoothstep(-0.4, 0.5, nA.add(nD.mul(0.5))));
+const mn1 = mix(mn0, color(0xc79a8c), smoothstep(0.2, 0.6, nB.add(nE.mul(0.3))).mul(0.55));
+const mn2 = mix(mn1, color(0x4a4f8f), mintFr.mul(0.75));
+const rs0 = mix(color(0x4e2c14), color(0x7d4a22), smoothstep(-0.4, 0.5, nE.add(nC.mul(0.3))));
+const rs = mix(rs0, color(0x22150c), smoothstep(0.2, 0.6, nC).mul(0.5));
+const mintCol = mix(rs, mn2, mintM);
+const mintRough = mix(float(0.88).add(nC.mul(0.06)), float(0.6).add(nD.mul(0.08)), mintM);
+const mintMetal = mix(float(0.15), float(0.0), mintM);
+const mintH = mintM.mul(0.004).add(mintFr.mul(0.001)).add(mintM.oneMinus().mul(nE.mul(0.0012).add(nC.mul(0.0006))));
+
+const H = blend4(paintH, patH, blkH, mintH).add(lift.mul(smoothstep(0.0, 0.18, border)).mul(0.007)).sub(craze.mul(0.0015)).sub(fresh.mul(0.001)).mul(R).toVar();
+const bumped = Fn(() => {
+  const N = normalView.toVar();
+  const dpx = dFdx(positionView), dpy = dFdy(positionView);
+  const R1 = cross(dpy, N), R2 = cross(N, dpx);
+  const det = dot(dpx, R1);
+  const grad = sign(det).mul(dFdx(H).mul(R1).add(dFdy(H).mul(R2)));
+  return normalize(abs(det).mul(N).sub(grad));
+})();
+
+const mat = new THREE.MeshPhysicalNodeMaterial();
+mat.colorNode = blend4(paintCol, patCol, blkCol, mintCol).mul(fShade);
+mat.roughnessNode = blend4(paintRough, patRough, blkRough, mintRough).add(fresh.mul(0.25)).add(craze.mul(0.3)).clamp(0.06, 1.0);
+mat.metalnessNode = blend4(paintMetal, patMetal, blkMetal, mintMetal);
+mat.normalNode = bumped;
+mat.iridescenceNode = blend4(paintM.oneMinus().mul(0.1), irid.mul(0.42), blkM.oneMinus().mul(0.05), float(0.0)).mul(float(1.0).sub(fresh.mul(0.6)));
+mat.iridescenceThicknessNode = mix(float(160.0), float(480.0), nB.mul(0.6).add(nD.mul(0.4)).mul(0.5).add(0.5));
+mat.iridescenceIORNode = float(1.75);
+mat.aoNode = float(1.0).sub(concave.mul(0.8)).mul(float(1.0).sub(fresh.mul(0.3)));
+// impact flash: a white-hot spot at the strike that cools through orange in a fraction of a second
+const uFlash = uniform(new THREE.Vector4(0, 0, 0, 0));
+const flashD = P.sub(uFlash.xyz);
+const flashK = exp(dot(flashD, flashD).mul(-320.0)).mul(uFlash.w);
+mat.emissiveNode = mix(vec3(1.0, 0.22, 0.03), vec3(1.0, 0.6, 0.3), uFlash.w.clamp(0.0, 1.0)).mul(flashK).mul(2.2);
+if (QS.get('dbg') === 'edge') { mat.colorNode = vec3(convex, concave, 0.05); mat.metalnessNode = float(0); mat.roughnessNode = float(0.8); mat.iridescenceNode = float(0); }
+
+////////////////////////////////////////////////////////////////
+//// BALL
+////////////////////////////////////////////////////////////////
+
+const ball = new THREE.Group();
+ball.scale.setScalar(R);
+const parts = [bodyGeo, ringGeoA, ringGeoB].map((g, i) => {
+  const m = new THREE.Mesh(g, mat);
+  m.castShadow = m.receiveShadow = true;
+  m.userData.part = i ? 'ring' : 'body';
+  ball.add(m);
+  return m;
+});
+scene.add(ball);
+
+////////////////////////////////////////////////////////////////
+//// RUSTY METAL
+////////////////////////////////////////////////////////////////
+
+// the rusty metal texture the corridor shader samples, embedded so the page stays self-contained
+const RUST_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAZABkAAD/7AARRHVja3kAAQAEAAAAMgAA/+4ADkFkb2JlAGTAAAAAAf/bAIQACAYGBgYGCAYGCAwIBwgMDgoICAoOEA0NDg0NEBEMDg0NDgwRDxITFBMSDxgYGhoYGCMiIiIjJycnJycnJycnJwEJCAgJCgkLCQkLDgsNCw4RDg4ODhETDQ0ODQ0TGBEPDw8PERgWFxQUFBcWGhoYGBoaISEgISEnJycnJycnJycn/8AAEQgCAAIAAwEiAAIRAQMRAf/EAJEAAAMBAQEBAAAAAAAAAAAAAAIDBAEABQYBAQEBAQEAAAAAAAAAAAAAAAEAAgMEEAACAQQBAgUDAgQFBAICAgMBAhEAIRIDMUEiUWFxEwSBkTKhQrHBUiPR4WIUBfDxcjOCkqJDJMLS4lMRAAICAwACAgEEAgMAAAAAAAABESExQQJREmEDcYGhIhORscEyQv/aAAwDAQACEQMRAD8AlW4IPBNq0gmL9vlXQSpY9Px8prIBkH8m6VuSCZ3xiT4gHi9a0FFv3eIpL3Cqbkc0WuxDKJF5+1DZpLZuxIAYGGYDn14rkXA5GQ03A/jRshbJYgW56GuIMtiQEBuZ6CK4ds7/AFo4prXQ4JPIxtJkf96FSjKNSwCQVll8prZcKWEQgHd6muyI2KHAdgSAv+o8feufT8HT1YxNWWsD3FgS7bQPyscVb1sAKUSXdWBwYZatagQAB/3qz5Lrs1jWgC6TdsQRyQ2J9KlVW2M2VlYgFSfxB4xq4sz9lUN2HSV7t0gKolRMMB1qBnYMpUkDYs7NZ6eP3qrTskhWAIxdXx6j/oUnYiPL6vy4v4QAK36x0mY9n6NLYLFGgzCgwPSsLHjIw11B8DQ+0WMsQqzGPWidQLdByfKum5MKlAvZtcnMLCrz6dK7VvOIEKzE8nzoXJEr+Ji46WrtYA15twTz/hXRHNzNFeGkoJOLdPSOKjeAHBGSkx9D/wBqzftZNc3mZVR1A5NdqYMzFSIi8+BHFTUFPxA733OtWc5YwCPQ2/Sle643ApkFuCDYQPCtTY2Kz1MH6USBtveHAgkQf5VzcHVSAzO0MFOI7hPQA2o9YZtxxLHNjkTxcXpBiSGlh/T43qz4/uwLQuOS+EWajCkstIcTmmJltSgkEcyCIBp+k6VUBmYktkY4mOKnTWWwJ7cTCt0DHulqJy2slVJOQBeBbLrXNJWjcsDeR3yGXBiEH7sj+QPpSG3EayjkkgXI5vVHyHDbMWWJuW8Ta/1qZgHDZHtBJq5SLtugjBXWdcoRAHgTBlqzUx1yFkFWkEfl40Mdime0gwfuKH2GlSpvEsOtqVyHXUlQ9stsXGTPaZntIymp1/td4ABnEKfM3mqNTuV2LbWwxMjlhwKQpTZthmLMzEFj5fuNGxyhjduxsIM9wA86EaxmMbtByPhNEpR9Z2KsOFAQnoKBg2vtU5kmfCB512WDi8mlnVCLQGIJPh40wrq2J7iHvnEeBHWgZ84XYcjYBfERXKBpWOh4vYSKQBBJ7eD0H1rcSjGJAMZfStSP/XFlJJPX0rHAJxJ5EgD+BpVAOXXr3IksV2obgmxqVgVYIyASYnwE0LFh35G57ga5lZmDET5U6JZGBMxiBiTf6kUnSGVimXbMMvjVSnHZr4YeXl0NKVBrcbA1rlk/nWRYsIE2E4ySTB8uKZjibcnz603ZoRzkDDAQpBt5ik44FsZFu4nmlZBrQagIZYdy+B4rSREkZXFj4msRQ2JmTJuaJleQRJVTLR5cVqQgXu2OduWFo4PIkUepTYEWaCD4xQOS5EmQRyegFqy6EXJHCxxHjWk9GWjtgDbCQ0NPaOgoVUqeY8/OiDoZn8RwfGt1+20hrgXWaQBD4qUve3HTxo1QW5EQSPKhfWJZh0up8ZowLnGzEWFQwARYsrAZWKn9K7VrdhlAIUnt6z40zSQSwjgAx5ii9xVbYpBJmAPKKJsgUdmJyWe0wR1vSizMJBxZjcRM0/W5JcKcWjrSdoJ2lojW1/S1RQcrkj3PUXtEVgKkAAQepHnQuqspgnrEedZpZu5cbgRI8fKohjqSgK8CRFAAFIEwfD1oySdccE8UIk3PI5NZbFIxlBkxea2CIXxo0GRkceHjPWtYCGUmDPNCYwbqB/FbD/GmoLz1B5rtYF59Aa5ioUqTDG60kMjWJKiG4PnSyArjMSEEjwvxRs4KiDkG4P8AGtOuLrwIk8m1QBBu7GRF6W+IgzLHpQiAwEE9DFd8hGAHQN+J62rL6UG1zY7VDkl4AF2NY6YsMLKWgeNzyKBNYxkk4jrHMWim7N2bg27AFArPtRv1gJhI5km1v40p0CqoewKgW8TVGliqzADcKK50DQ8gk2PjFc+1J14oW2uDZlsokHgyYt6UvUPYZjuBcAFljo44vWKi4F0XxUZc81krDajJkSBf7Vlcj/Y5opGzaDGeQALEkQCCB+tTDedrAn8gFVAB+0TkaYEdtRk9ggGfEWqfWhQlgYcDtU+cgitJNZRjppsqOwaIaZbiw/ShchSCRAJvHgDStjdoBMLIHqeax8wAsSCJWqJZT/GPIz2lDFm8Mj5maX8hAoDA9pvFUDWXwm0AFR6i9T70I7B0n9a1swSGSxZhK8x5mn/FIQlWWQwyE9KUYAkmCL1qbW1t4+JrbdGVmWZ8shtiwTivdIrNemJ7YEZE+tLbJtuTCx/ODYEVRcwB+OxbGs9dwkh549m+icJ+SIxgdw9fCnIo16mk2JHHInwoPZ9pwcpMC3qJp2iAO4jKPDmL1huTpyo/ICasnTYWljyvAEGaesfIdn1WE4YA2AtegYB2X2xDOYPhcc/SnfG+K2tshCv+XPQBgSR51NrySTsM7SNh1M+WpCCSOpuBSm2FUX3AVPQDra33NcdAmTIRoiB05M1rjYiyRLIwIy8Tcfwo1AJXKFPuJZSywxUBB160qRi68258OtD8lD2sGh5kjyPFYC3HAvmfDyo4UD9nUnBiqgN+MWjpJpuoF2Ht3OVieYmlsAxKcKYKA9Y86LVsGsDWohmP5eE11bqjCV2EU7QA2LsSAp6rB613xxs37MNKBdzgLqVjCsFEt/ClH5bttuqhphVPEkMCT9aHft13XeDrZBK7AeD4D+dcctneIS/coGxyfawCkHH3JlYgUfaNYYeBktySR1qMb9U60KNrBaF8MbQDVCXRRqYPqgGTzeuqcnDpQwlZkdiwDHp9Bf6UXtGFAGKySQeTItRadZD+4yyOFb/ypZ3e3I2gsGJkTxeBWkZZoYGStmBkL+lBrf3cmAhh+Q8KacQfbHOOR8qDEImcRHIFb2jBxGetrAsIisjtk9pAkE/1U3UiscjZZ/jSnDuMSeZH0qZILJSe0fgRlHjTMEkEDu4LHgUnU6+8V4WO4+lWQ3uhbspAMdLismy3/jvjfH2atp2pZi2tWmChxJDx615La3upl4H5C8kcGrkf5WvUNQUF3LCethc1NpR0XUyyFIb8ufL9aiE61DLncGQcRzaQaoXZjpY7Dg0kAeM9tI17MDKKUyAyY37pkij3au8rsMs/fPRQeTSgYDIFDESYgJ4GOanbY0woleoFW7nI16dIiFksetTSrBiILA2ArSZhmBQCLWPAPTyolQsyrHaLCB40aazsIg8+NPQPqxUkhgbgjwpbJI1Pjjc2CkL7YlZ/d6UtlbTIZYYmYPIHH8ar+M5PyF3EyAxQpH7TzFP3fGTYxJJOU4E+E0KSbs83BU72YAtAjzPSsWBsJbg3nzo8Q+rWbEoxV56XsaB8S0IDilyfGa0ZEMwDM2V+v1NYWYoSRIBFz4U3WEyJcea/UWrhoGxHPXoKhWBBK5grxxFYQBtgCJBP2oFRhsYG0CRXBjlJBkTfyobKwlLZGfG1MZSDIPrSVLSQRckGaZJZiB0rBoPKVAX7VwIePHg0JKr+N73PnXa4J84tSiKFYqDH0rjixErLAQD+tAW/HETajZuwMPrUyM1g4nYq4xYeEVTIKrAi1qWk/jPb0FFLlACLryPCKvkYMHMEeXMGicCQVk61FlPMjk1yhHLEdpABg+lBtdWgXBEKseFc2zqkO17f9zqf47EIqLmpi5v1qZnF5E5GQPLgVwS799sSGj1rXRVUgsclIhhWZRqGF/ulRQQsyI56+NH8f5Mo7hJ7hHXyipMI5gKpkeU1X/xWhWDO8lS1vArfurDdo3FSaoxcoxgEyQfvSsvc3HaAQEg+tN3o2xBoFnLAhuomVvVY1ppDNrhzIUE8ASJraMQAUsoC9sSR0kTXEBWG8LYTcXuelN3b8swBiZOI6dI/xqf5Ab4mp9Y2AhVZvHpap9ol9bE7NeQdC0EDLL/x4Fbr1g7Brd4RVBLj91soqTXt2Hc2BlWhob7xXtr8H2dXx9jkEsGOyOg/ICs8OZNdcwhB1FMUNyFyB6yLEVNv1k95NjI+sTXqN8lPj7H2ogLFUXE3iRE/U15Wzd/cbVrAm+WXFhzWusGeVfwRbT7dl7iBcc80KlgO7kcCKZrQnZtH7RcfxpoT3Ajo4yJhQRV7qC/rci9HxTs9xSQnWOpmgIJK2/EAk+E0/X/a2ZXbxPW4oXGQY5ZFSApFhjFZblSbXMUL0quyCQYJIk/at2atmpmVLlTIHl4UZYnAIwQCQynxFc4fFN2V2Yn/AOIFU0DyF8MI+zWHlXAw1sfx8TkPCDFWnXhvfWiSrEIrT3CVBrz0JzOxXzkggDkMV/hV3ygTpb/aEjZCbDkO44tcfY1ydP2X+Dater1sJUO1X1G/srJPEpzz41xBbVntEs9lDdIsJ9BWHF/e16x2kiJMYCZg+NBsUbUbZokS7SCe0s3YfsBWve1WTPoobnBDvCIpCCWQ3y8RwaWpyAUCWMF/U1vyg3uPjdHHXoOa3Wq61uJdrAeVq6SjmkwdhHYSPx5HhejULuWTINwPVaWJ78ZMkZz4UUQIax5AHFWpLZLsI7GKyzZD7XFT7NmaKNik4wD5kj/OvSOB0jVsUwQzqw5NgMfqK1P+OTYju5KKNiBepx4E1hK3B0fVKSBXb5fyNZg+2v5L4hV5qz4qsrRsWFHAWxKxaqx/xY+OuzaHXaNbDU0WPBuPtQf7ofFMsgYEsit6Cw+orfKjJjpyqNBzAUNCkTI4sbUlyhdMbo3J8GNOlsA5K2FlFrGTFBunAYLECW9a6HIFj7jKgMBTBPiB0ql9UBVIhYkx53qb2WRW2qQYYAL5QJp7Mx3oGnG0DxkUyEALrYR1BN58qz2mJKgE839L01cz2cX59b01A6qb3k28RwKUAGv4wlF2rHM+ciqEB1MrAEjFbeAvlTJZiXe5GKsfNaW+ssm0OxEKYM27qDWTl17NHyPjnS2ShYdmsMSZMDrzWfNIQbIGAVo1nwFv50SSfiKxMbEQhz0s3SpPks23BGeVBAYxwxnGfIg1TVElIG1do3LrJkQWc9MokVqtr2IQzZEGdjDqFHA+tM+RqTD3C8M5XW7DiUnj1oPiTsfXpRAG6ueCbzVJNIQctmxRF0Zj5AE9ac+kMWIhfDHy61QvxynyNzouYGK7BERe5FdsV/jh9NgWGAbzN6dGdiF0up17AcMe6f4D9KLdu2Lt2bNkszzkPW1M+Prb5ez2ScZkN6AAim/K+Nr1s+tgZBCSfSZ+tSTJtAf8em1drMr5ARI5OJnin7dyysEkhiovwOaT8QOmwEdgKwo6kDmsYEbTtUAISI1np0mtox1kR3LvdDxs7gfS9DsyAJm3BHlT3DEwEuXhTPWs3qrYsgvMFPrV5In9wssOOOR6UtRsVmckkJ/MU7AK5m5JJPhRa2Ug6nNoknrJ4FLAnTWrM7bjEFf/AKgdPrRlE2aPa1j+6gm/W9x9qz5TbHIBUKIgRziOaYcBpT5GntIdgCeYi1YbNoiRXVr/AIxf7xVCKyBmUdxtRsj68JEhgCftIosWk6gbnuHhUiEOpKwBfk1mtIcEfX0puwg7CU/Dw8LUOtCSPP8AhNRBIAXN4jiuAyeOADWEYu2PMwKLVIxLVlM1AQVlETPNqcssSSTjAsPKsCFp8u6tV2QHzv8AWpsUoNKmCfEwfoLVjYgBjzA/TiqThlf8CZgdCRXnfK2H3JB46ehrDOuRiQNjPyOMfE9awOCjE8xx5zzQ65ClmESInzoxquYYYkSDWRMcjaQrAAY8jxo0DOCElIuRMCBaP0oArKSVvErkPEixoBtLaj1Myx8oA/iay3ZpKmXLsHyPkaiqFNjkQehEVYvx1GknjMQfGCcZH0FI/wCP1n/b7GLdygEt/TA/nTNuw7Tr9oxIXIcccit8qpewm/wT/L3at3yE+NrBX2wM3HHYLj7VvzdoGhkbXGQ72aP6rfxrn+KzEHXbIh2HUAc035iatvxmJkuzwoa0rBViPvWGn/I2mqPO+Jgvy13gzpiQOb8fyr6VtDbE+P8AO2EAfPAGtJsDrYAmPQV5Ov8A41/j6DsbFUQFIHJgc1zfN2a9bHAnHUo1jomdywH1oXXqmLUlO5Ame3SQ2bMZ5sTx9ImvF2nUuxn2ze4I8Jq339Qg69n9vcJvb+5ZIWpW0n/ckPGx3DpbggCjtuFBccqbBZHG8A/mVyIXjiaXuLNsz1AKZkgcCOlXJ8cn3N5lNZ14xM2HJHhelD466dKvsODySym+Q/K1Z+vp46Rr7OKT5ElHXWwa8ghY8r3pb7fa0DV7c8hf43qvNs9GRHtbFkN4k+NJx1yvcXSCI84INafWtHP1ZMwyV1NjNl6Saq0K+rvwOxYyRRcAA0rSgRySPxAMngzaqdO1lVJYhSCpA5Kx/jS7QKE5YClNb7NmENlmg8v8qpBbZ8jT7be2SxfZsHct4NvrakfDl9qgEFkLDF+GtlHoa0NgWRI1F2yCjgcceVqzFL4Ju/yY2tjvdRfFhg02cDIPNE67EB1TfWSAB/V1pbNpTcMCWTWXEjmT+P0yrdz7Sy+2JJb+458+v8qzy56c6N98rnjn5sX8gZMA34zMDzvFDAXUcx/c0gAed6J+4lv3G5jihLsxxYCbs314rorwc3QrJwZAvww8etGobZJEG3Hj1odqFZmS0TPmaWCdanDtYcn+VaZlXYO93G3SNJ75V1U8LBij+I27aNTbXmFnEWsjdfvSm0suobAY25kID0VRkT964e6P9vtUGGNwOqycp+tCdti8JHo6PkQWJEOWKy3F+8fxpGlPaQ7nUbO9neb9pEWHjXbGAJVr3kH6WNMfWNXx0dzZv/W3+qbTWzDVfkRrYfK27NsdoYkJxY9s/a9FtchwEGeUi3EVvxdR2DMDEXCnzIxxPpWukBY6GCB/pN6Vgy80ENTIUQwGELzyBzTtY0uxC7JdJyB8rWpB3I25HVCIkifOx+9aioFZyhDtJR+JjpSshobrm+IlVAy8ZBtTkUNs6ynaB0k3mg+PkFIIJZiAw8CJmm6jsYlgP7d/b8TW+f8AZlj2YKmgO8NtfutyeKDWpXaWZv7YLKyEWnpTdiD39Oa5MoDBF/aLf40Owls3BmWUsvHWl4JC3VjpddnCKWYARJkBvvUhQ6thJELtZCBzBn+VepvGwa/YJALyJPWDepn1KdWLyHkQ3iZF6w0zaZLtG/Zq2qusBSV7vECzGPrXqJ8HWPhpu1qutzkuEyyg2L/YSKgTYXbcEGDJIg8Hzp//ABev5O35m35W23xtagsDyxxItSg6LEXJdWtVIDKqh/OD+XrXkfJDanPuBmBcEE+B4/UV7mndqOpnHdk0lCbSo7YqH5RXY+20rYBOceoj0munUJI58y2wPiI43SoGLAqxHQjrXfK1su/2WJYESH5OZXg0pNr6HdLqwAJPS5mm6TtLvtcZmCSfE+NCwaef0Ga01rrXuGSgAMehIvU+1127zwD2sY4m4ihfVtVe0WBJn6mk69ZOwsVMCCD61tHONjBERlJsQPA8Vmh0JZGH9zKZPgK3Zq2Bn2ond18LWoFT2/kLnc4ZwP4VnZpYKzr+OirjD7AMj055qHYdWzLYFKbLOAfSJH1qw6ZVlcSSexx16EUIT3UwZQSpAR+DF7fpSzKJtpXbrZdlt2sCw448azRsXZ8YaAArIw2AHwHSjb420STdFxVyPB6JNGOtWA71YoV6kTastGpM3xuOtWGCFSUjxBuDQbdLjV7i/iBc+EEzR7BsRgcSfbtB4k+NOvr+M+hyH2MZcf0gioTzIZgSOht5iqNKkLkTa5Pj6CktlgET9n4t40xMii9ZNBDtWtHBg3N/0oMIPn0rdH9vaRziCD9bUeyMzF44P2rJ0CUgATYG0+tLwkqov0M+dEP7mwCJgTHSmaVQ7CrWkiJ6VCgNiOq4gT4x69aj3aHBVuli3l417mj4505/JaLqFMmQ0jIH71K/x1X5Ge5gqhM3H/41x6nJ3UYSJdmwOIiBHTxoRdfb/d/lMUJUZ4IcVvB59KZqbX7ZYmGQkZH+o2pTMNHNiNCJMEyPAz0mlaUn81w4YnoYFMUe6r7NpBGqHEdSTEVqKSATxFwPCs7NrBXr3ata9pOJYNuUdR3WqkMG+WXsFUGAPMCTS/jaEZlciUcQR0OJqPWcG2uklSWUzxYkwK1LSU4Bc2Wbc9nyz+28yOJJ/hArfl7lbXpbaQSv/rIFxJuxoFJz17dgDKyZY8EZCw+lZuDsFZSCuxe0EdBbEfWht2/IwpQ34HyE1fM17fkMG1MmwFG6wo6f6qn3bHfRs+RqUBXPXooHakeVZvRNPySFggZKs/uYKV/jTdYC6GCpgyLDK1+6Mq5S5g24gj0qrfG2fH3ANsVivxV6T+5/Si1ANq1qR/dV2GxlN4AED780saLJua3uqMHBt2NJ+t6NnVta/H+O4G4s+5j4YCw/+UxR02kjXCT6/Qe+1dHds1KysGdEDfkjSn8aah0PoTcSGXuJRplQPy58q84aWPxZ5d0O02uovKDwE0L7X2f2g0arQOlz3LWZbNuEgd20/JKpqsgHaIuqrcfcUUTv9kAqG7VjkFhmBQDRs1IjtYvkHKkEsFi3lasV2Xc7JIJgaixgiT/hWV05gXyonyP06n2K7NCoCuakcCDf6VzA7SxzKHUCTA/KJAC0slRLJtcmBip4DEkHKvVXQFX3fkbFZTDQB6oVn1vW101T0cnwpohB9lQ6jPZnx0CsuJDeami1akdF7mcjYSvmYn+Jpbuzv7uw/wB3cv8AcYCwBaZI8aam5wpUuFCEDEDkHtmf/GuvKcHB9KSVsfjAFgQczmYuCO6D96zbuU6FRTYKcI5MHIE1v/Iad4V1EsH2KSfEKQFJ+hqHYz6Vf2iIIK6+pB4NZ55hs6d9z6+EXMf7WsOuJZZJmeZv9aSjgtew/EHras1u3tgucie8DyA7RS0dW2EQRLSGq+tNZD7ek3RZkQVgTCkH1m1IVRsdw/aCIAPA86brDayxdo1zE0Fk7QC5kw39QreznhC9MfK0iTD4FSRyep/jWOjD2FVvbPJU+E9a5tv+0QBB3Jdki4zPNKXRs3bCd7nN0A8gDa1L/clcvCH/ACM9rrsAALE6wq+E4z9qq+WulUCFz2KcF8MYmfqanSXbD8QqEKfGIvQtsSXBBZntibwJkketKeQi0Zq3jBfiBisnIsB+JiI/SjVSdpYMZhiD5wY/Wh1Rjp2FRmELuRyWUlao9uRnsaGZ5THpbKKbgAmYY6liCcuebBb/AMaP46AnajsWTXcE8AsJj6Gko6bdkC+ZXFj0BN6Z8JcH2fFGz3FkHYx6XmtJ2YYzVnpYBiWDNBjzHWrPjJsOt1LAE3QwLACa3SrNta69pMeFrUQQ6yirYkEuP0H3rfKsy3IaqEck/wDsaPoKD5B1KC5bvLAEDxPbXMNhYHYwDFQwbxuBjSdgZ9oQHEK2RtzBrTdQCyE56sScLKPFpvWOmzEbCpGDKpn+lj0+1Dq3B9mFwg7i0Seb1fuBOvY6yxyU+gn8vpNZtmiH5ARiX1rdmAQDm3Q/em/7p0Px01gDZrBXah4NyDP0NaVbSyMrLnC9p6wZJpG86929tutsGcr7hj6MR9KMMcoLUQoUqD7ag/TumaDXsbb8veutRCxB8jLcVWH1atCrs1wNQYMR+hP1FR6BvTDZrjNWIdl/cptf/wAZrTMoP5LKfkCTnAFk4JnEA0YJ91NIeEc+2viCehp27SyZ7lEBe5R4wefqaEoi6tQUMuxgNi7DxmWvQLhlCkbdi6iMQf1IFj+lTHUDuOxZGrb/AOu1rQaodW9o/I0sC7g88qBAWk69/ulFIkonaswI4radmGsi9oHb7jY5HuA/cZmaR8ldOn5SmZkEP/lR/Icn5Ss5Cqpxx/woflIduo7CO5QWnrAuamSK0fXpKKskLBGXgTEVYvwNB1a/ckdzEEeBuKR8XUnzfjJu2IA4BeR/p4n1p+/Yzn2AwTFAD4iQb/StGG7PN3aU/wBudeti20lctYtwfy+wqfc29d2etiughWB6jAzXtfF1axrd9zBoACQLm5x+teb8vW3+4/2+sEByMTFgG7j/AIVjpPJvlqYG/KI935KyGRmyVwfyUiRFJ+Mmh/ljfAddiYlSeHHWn/E+ExTejEYJ3mf6VXIx9KmQe0yD4pgqScG5te9A1DS0Sv8AHxVlazSe0detbrVlRWYQTYr4R1p219jsCVCuDkwPh4imKzMQuzi8wPE2qbFImCwxLdoED+c1r68yFTlulVfJ1rheO8j6KLUv4+pcOfxBPnINc3k684EBNgjWTDEG48BR60aZEx+s09fa90MekT9aR80BcDrYh7uAD4GSDQ24o0kpPTOz4/8At9WpTmIBUfUC/wB68v5bHMslx3CD1EUzcnt/HXdEG64i3auOB/xpLZbfjoshcADEXkjg1nptuMG1QnYVfXoOuMyrFwD5UtGDqEcwFyJHn0pBOn42jcjMPfZk9kjjHLJ/8KdoCMPcN8pkD/TUZHwPaDoAFJCkeNZqGzSxm/LKp8uKPUhOpQGlSQ5B/hTmQEWFiVK+MUNCmehoY6vjk7IOJlNY5kmSfuaRsTU21dAkYhtjpEC55pwGorpZXGJMu/gGNp9TW/J9v3clAKOmBPXEtcVqH6wTakXZEZlAui+2z2hRf+FBu2t8eFZcMm/tCJIMSp+rUOyTsBFwrEKWstpePtSfl7syu3UZwZXdmMzJlQvpFZ6o1ypyNv8A70LgOyXYkXybua3iDQf7h9TH4z7MmJYByL5ESJoh85vmb9vztKFiJb5K8kCAq/c0v5I/3O1PkBICHuccAzK5fas/KNPw1RD8fXvcA44quZubEnqo+lGXl/cUKCphU/1KR/JqPbvTZrlExxydUHhzBP8AChGtNrNs0sAdesGRcZDhvrR0qXyZ56hyY210RXOzJdbMpbiUJBI+ho9vydS7HfTi2ty6a0j8SQDl+tK3Au6I3brARS3+om5PrS/joy6XYY4tGo48zkSI8xjJrmswb6/6zJRr3Y/GTW6DLVAH9RyPLUtGwA3bUDBNmLT0N4iuDPq9/Ig+6Qcz/SoKg/amps364VUXHU6sjm8iI+tZf1uaOi+1eqT0SyXZfirYkFPd6MWMp+temNmrWh+O+eaQW1x2hrBiD96lZ9e2EKQDdSpgWNr/AFovj7QVC7g2SbW7pBH9QU/Wtf1upMP7ZTVBkawQVbNyTY9VxNzStxDsDJgqoCgcgClNub3224wTwB0mQR9qxySk6WIjtkmbm1q9PKqUeTp3YfyGfW7bUclP3z+0ETH3FqjRwq7nIDMyx6GZt50v38A6P/6mgSf3QY/nXABmYntbpHXzrlxy5fsdfs6T5Xr4HyzKhB9xiveAIiJo9etHLZdiKhIbrlNhFJTBSsEiIk9Sf8KYuzXnGxS41hgZsSDfjyrfdJJGfriW2am5dWSfnkA2R/0DpSV2MjneCX1v3FehJHAoWw1MvuIWIU4AGILG36UQ3umnJUhfxjmCV/jWZs00oQ5Rp+Y42Aw2sEEdTaRNDrbXs1qpBLvkoPVSDxSdLTsXYUMtiCV8QLmj0aw6b2dSrXcFeYN5/StSYdYCYBtesa9odlOG3SLMhVoj681mPsQ4mBkCTyvdN6EjVsbNDjYsXFiSOJovkMx04hrbAZ/8jaPSktjxpCk7tThkIxkC0XJinaEVnKiZkKvlY9xpGslMdaEBNYyAHFgM5+9d8cbGdiHKjbkRIiYtH2rRkaCi6FfamPt7AkDkyRBFW6U+OCH1ABt4ho6kE3/hSV17NjL7oXtupHEgYimPrGkru/pJQfW0/StcrZjoP4R2t8gITCFmGwN0m6/amKytvbCTc5bemIMAfrXa/b+UmcY5MIxNywsZ9KPXrIUEQAxDQfBfD1rSQMwhSNZPeScfop5FZsQvtZyD3Lj9BTC35gQD+SMeIBoFxQsH/MzYmzNPT6VpgL1YaWgsJUhcepDVRsZm2XJVdsLA5if3Vnx9J2pniPcduT4rz+lP3IvtkBgzbUlgOhXhaEnBNqSX5aHYZnGBc9cev8KSdQ062UglNclth6k92PrXo7xrRVBIbPWpJHAP5fzqPbrY/Hy+QSNTOuxo4yHj9KGaTGa9e4lWkMIPY9pxIIB9abq//jO+tACdgwK9Bl3Ej1Nq35Fh8bV8gwLvs2DgMRKIxpejamsrta761BLESIawYelUhG/IS7NIc694LooJib89v2oCkK4eYxOC+Ew0imbNKiAxGYBOYHask4D1NOTT/u9gG/WUIABYf0rDW+1UyLqyf5Rb42rHGchJYcAmYX70PxPaVV3fIIQqDIPHbwPvXq/7fUPkNo2RsGxU2JrPheGP3rxtulM31FZVC3YeTsBP6UqrB3K/BLuc+8+3YQqhonmFAmad8ZSzZvLDEtHTFpE+l6xlfMoijeQUbYwuArDirNepU1ZLslthF1/FdchcTTIQK/43cU1vpgh9LFlPip6RXpfL1TO8LckKFH+oSzE+Vedr2H/jv+U+Ps2L/b2ghyfwMf2zfyr2/kONaoQtsQXLcCenqeK3za/Bz6pnkJjsKYy6agXJFuBx9CaezsmxNdiqkvfniqt2tfYLagFcz7UC63uT5VLuR21hMcm1Q2x5iR1VaBWgdrpsbVqTvsIItKixn6VJ834r6+52CnZtDAgR2IB1r0tOvWm1Azd/cVkRZr41u3aMRq3gPsLTr1sLSw/AnpAoiUKcOFg8jcruikqS4/uI5ECMiMT9K4sDrVyZDMe3iAo5r1dm5xtOkrlrLWc3C2xNql9oAOXUAM39odQvUfWsvn5NLr4Jtms7NcRZjA8fGhVGyIwgCb05VfI5GOig+XWjJK6wGhmHJ8TSvrTtuB/sawiUoBPRkBJ8yLiaBNPv7Ru2GAwk+lP3qWbLrHeK1C0hbe3AC1h8QzfPc2ef81n3Mmwk4IJVR4/l/KtAD684GQXOPH/tVOzQSWwiQZKt48UDaimtmU/3SIAPAEcVj+vqXRv+3nyeW/xm9vYphnR2ZCPOLVRq/t6cAO4wT5eNcuhsMGYZxAqtPiYIoszEjJjxEVer8F7IzT3NhBUDmeLVcqr8kySFEAA+n4mhbVqRPHbC5DwnmiQeyzdssjEFPFKmiT2cyrq7BYF52ACQB0P6UBY7e0qICygNgCDYH1F6pfdqCtrLSjcL43mKQwG3cxKgQQ2a8z0/WnQzLEMRl2PZXGWRmWFyI9KTvG35Ma/j65CDBjEElSYirNi6N4Ca9R7pg8EMY/Kkf8Y50vp07do0atRJLMbypj9K5dI6cAf8b8s/HPz9WrWF2btoQljH9p1iPUEVS51fG+Ovw3OHu7UTYy3ZCQWLEdQa8/53sLs3P8UmUIT3AZGzFy3ufWrvnbdfy21/Okr7uKlOhCn91XG4H7NTtkWuB8b5CjuzGEASRIEKKEa0XQu73O9ZyH4yvEUvXtn5GxTtNx7hItcjBsvtatfUuxF9oZKpi12kWhvWamkc5YDIhZS7yNq5BR1ABNLGxlAL6wF2gFVHMiVyqr5Otiz7VdSq4KREYCDP1FLQjUqsFLCYDR24m/60NWmXs2mg9mnSXbU5uVWW6KMfxrXPsb9igZ69qQrRAkeBpWKN7jZZYtlqUcgHx/8AGmquWoAbFlJUMfTL7xWlzNmPZghdiJOBy1sEKjkyJpyLqCmQXQzbqHjr5XpSEB027VJVh7i+FrfemJoXTsMq20Fi6bAbywmfQVtKgbpwC2grq97U8tyTzcHHH6Vu74YGT6yW1rcGIsQJP3r0fi/DUtvDKGRhnqOu9+cvOgf4+OrXoRgLgB3sWZTma0lRhnz21YXB1IGxpCtyI8KenxNpYqNeDlfcTL9ytam/JzZsdikAd6hx3AE5QKZ7rak2Aufb3Tg7WkDugH1rPrYt0QhHfaikAHY4X0MgCqCjrjtCAqQQWy9RFJIXVrGzY5HuMVH+lpWT9anG47cH1MwVdjKVJ7etcu+n7QsI78cJfX7bY3buVHfZr1lkQyCeRYL/ABqbe2+QhJfWzAnwlRTjr9122K5UDjWOBEc0hyBuZtjGIMRxfigv9hbFK4gELtYEArwVHJpuza+pv7Ry9zXCj/TwDSladKaQvubYJXYegPIod5bBU1mxULrY8wt2rS8g8wyzCIVmA5JjmBeK59aEaibBmZkB5K0rTO1dT7BCgqZb9xqj5BYbdQK2wIRV6E3P3itow2K+bPx9iYKYKYGOGFpb71XofMINjCH15oR0I/b+lK1ajvbQ7390OqHoGuY+tP8AjqdzvoKhfbEIR5GDSsmdHGUTX8nYSqDarH0BiPuas2IhXDY0OzFUb1ExS9m74x17tDsW2MuWCjwi9cml91n7ULgqwuWP5Ca2jLHayibYxKu/dkOhI60fxtWIna5bYchb9sdKBtUvm07AAJbrB4B8xViacHZ35PaAesm1aSZlsD3UnHEk8X4YHgUlyu/20AxIET1v1o/kgS3ipOY8AOKV8XWgYqRiywwboJ8fvU1okUHc2ZVWEx2HoYF67V7m3cBIbEWU8Et2/Wu1NpLqrqSgAggQSZ/wNO0rqd9O/QrO13cf0cLn960pmwZ3zVGoNrBhwSjL4YgAilfF2DP2NZLI5YYHuF0t/wDlTfl4fHHtgltpALzwTNAT8f43culhiVY7ZKnHkqPU/pREstHD4ytGnLMKy+4j85MCDHkPGjY6tTO2oAa1tBNoKwFrt+o6dCbX2Y79rHBFvOpx2ZeGIJofY1q7I/4Njiy2AMHEt/480LkX0DqQndsT5BN5eVa0Y5Z1SvyMGbfrcjWhLybyOAPsad83/jNGsESJYIEQGY0lVbI+ZmvPZp+O2rQgfcoKkv0BP+Aq6TURguWuleSzU7Oyb3UHFWHuExJPaoqJ9hf56b57MQjOwtIY5RVm74r7fiatYZUAc5prN5PFvWovY2bfj6texiDoYqzDni1Fiod/oNR00tGsDFioeP2r40OyPiwupvc1uwyU8EA5TVWjdpfW+kqoaQNg8hxFJXRt+Q20LiNKSFStP4BfNC/+U1jdrQoQdS9+lR0kd33MV6vx2ZvjsXYEvrBZ2GRVo7QB9K88Ou7W+h17wjKqeRov+O3Nu+Mqs7D2mIP/AIm9dOUm/wAmOpi1gfoDHWw+QcnYgliZ7gJF/OgDe6NgE5azBx4Kx3H6Ux3QHZs1kOGNlPELzPqKPWyFLIFRjLX5JsAPKhLQTFgvoI0H3WVgl2/qBW6xSFD7FjfimzY6i4t+Uynrjei3biwmGRl7VEfl3C9L3Yr8xNLMWOths+O5v3E/3CT6Vl5X5RoPeibCjxkrWtyWB5qbe4O1jlJAxb6H8vrVXyMQx1zClWVW8wef1qFMQQyrmYIaeTFiaeshzYIaXGsQxORtyIoNuxveAAnXJkDk8U/2kdjiZHPdY3NI2a9mt9YUlwJs33qftAppjGZSCFHaBAPjJrZCJmwkvKx1ECLUrJlaX7AbeVHfYoxIgG5HQVO18jy4fwDcrBkdsKYrSpOuGuSOfPiidQFPcREEr4E9KBS5MqbLBIP8q0YJwxVgsC3U+dHqLYEzwe6PGlurAGVsSSzDiT4VyIyjBeGIP+FcW4Z2VjyXJyPcSI2R1ERIp7KNaI2sn+kSJsZ5qdNZCnCSSD14A5gU7hVCg8HOeBWXk6LA7QvtLLBdjFo44AHT70C6DkMCUbkg8lhcRWwp2e7ngEYx4GYpjOdm98AJJEievlUOyR12aH2pqH9xi3c/AzhjJ8fCvIY47QikB9q+2G/qLG7H6CvSZirE7Ax1judTJkqYA9RXlbsSzQhzUYSBJBXuv5ma4fYdeMFGrWhC6YDqFGoMpgm8a4/hVy/JO/SPj69QCa2Idj0liuJNTfGB3DQHKqF156itgrKRDbP/ABmaIak+OjKz+4zSMkPacTLN6tNPCsPsf8Repve3M21FVXRyCp5juwaubcw1t25Ek4lTjII4+gFL90jar7Na4XUoDAYmxIrGIGzNhJIJKC4j8gF+lZ6f8oNc8r0t3o3cC2PsklIUtlcjoQ1VLufT/wAc+pDiSonXzJI/gBS9P+41ofkagA+wLYi0N+2Kz3WfamnVJ2IY2kC2RET6RWmr8nJeSTQGfQ5ZgkZZL4zFqPUwLuXgAiSJiABzQjWNOwrORDEEkXNOITYRcGJLqRf/AMa3zRz6csPWV2kBxKKvaOJLDtv9KcfYOzXt0MdHdiyMcjEAwfKxrtR1bQoyx7QAjDhltT9n/Hj4/wAr39rLsxxZUFsmTu58xXSKMyT/ACdiaXdPiq+rMMWdZgBgLL6VT8XcN3ytWlgMJxDtxMSPrIrH7v7QcgouG1oBAZzyDboLUxNaaAHGwBGJVGA5WILwescVlTOaKo+RjbviO+z4m7Z76a8zuPDHEhgobpzBrzflgb9B2BWdtE4Ce1QzW14+Ip2k6U1oyrBBEkD81LBWmZo94h93x5IZyW0jG2JiVdh6UzKKIPIbZsV9GvbGrDYrPInG5/lUrBcthRxs0yxFoE3MRVvydcPuDMAG9tlUDIj9tj9al26G1asj2w4W9iD/AFVx64ts7c9ylyJ+KrODtVpUj+4pMEwIJvSwfjtuKOC2q6+0tiP9QNNbcuzSnaQUIDEDtcJIY/WKRraT7gIEsTH/AJ8Vz5bizp0lMrSHsyjYcGBKiEItxyR60JO10aBOLSx/8h0+opHyEjYXB7LKV6qGFM0PrR41kkOxyU9FHFbVHPNlupP7f9yWWxCfScvvTtrd+kab6mgE+By5H0tTPiom3TqLnEEMrqT4CbH60hU2HQpChWDdig2Ck10WDDyV5h01qVIXNXQDoVBolLK/s5gFWGJ/qD8rNK1Da6wg/rLE8dswBSxJXbeRA7Rc5KLwa1tMGW6dZ1kCRLIWDdZyIgn0q521H4ze3KrrxcEWIxi/revO0bDOksY0gT3cY8qn35qnXtGxDqS5ke4psArHp9q6cvJhlelGGwTsEbQb+NsqoYnW5YD8e5kFwcQTIrxdPydqbnYcIoRJ6E9R9DVT7Ai9rlmvkB9xUugfIzbt3bnyIB1sIBiCTAvS0UrCN3ZqcgeTi0UK5jWH1oXyMhZkheZPpRa02/J2F9IhwcV2TAt3MBNSdkZpAKurEQvSe6xA5r1/jbdXxfl7PjoXXVs1ga9hEEnqv/xqDVrOv4vyturUHQMoGzkqR0X681V8Xe2/4+tvabdk+zYx4sy44L6ETXSDD68E/wAqflfP27CCHUZIB+OSiVBr0t3s79GpmTLcxB1o1lQsLlwP9SyK89Amrcmjce5gvtvNg/WR5AxVaqdabFAX+5OBBk5AjHKs0UMk2fH0j5ClGcztbX8fK4IVe9j69Ko9l9yHJgygf3GXi1hTwE3ODq7TrJbXHBPDj9KHRn7mCqNTkzA45No9KU4sWpUDWjZu169j5sQNm4g9x1CBP0sKm2adWrZt27NZ17nUkKTFwLL9qWfkNr3nXI2q4fQuNmAJzInwovlHds3fHLCezFcrmU4ZvUCsvqTSUQPadOoKdcP7YBEcKQpnz5qMoU0vjqldey/d+QMTH2qj4w0odzfLbZsVF/t61teQVAme0Cl6yf7msgqj6xtExAUk5H1EVKwxMCt2hkxfSct1vb2A2jrl5iq9W1lRtjAGR2qObck+Rrdp0nVuca2z1pkALSQYEetTomxk0bPx3duIHT1pdOimebC+V8RNrSttrGZUz0k1D8XYukMmQ7mxg2OQt/CvYKK2bFiOgCjkwJqPZpTY2zRiCZJDCJ6VpqHKDlyoZh3MQ7FcthALqOIFpFORgD236YjpA/E15/yC/wAUdSdcAgdAb00bxsHuC0wxbhTa/wBaF1di+ZRVuDSNimFgh58ebelZu3aiPdMKFUm/ibD9KnXe8ojQum+RPieDSd51oTtacm/E8r1gEVNgkN27dIbXOzsZgoSbwRP8aH2tTgZGGF1YcyTNDt7dmpBrycEFlgWIHM0xCJIxjGApjkmlXM5M4Mcpg5Y5NBsefKlb/dVUi7EhMeRBE5TXbIZS6XckFiOpbk1ruWXXAEMR+VpIFWrGLoD3H1/2tuvNVm/P1o0XXAdZhvy6W9KF9KNDI9pmAeGnzrWcHYEgFzN+Bb+qlUDFh1ueRAOXW1r0bGyMTCqDC9OaAIuwK+t8NhBkf9eVAQ4BDLkBcegoli0gw2QgrCkTM39KHWgK5EnJuB4RQSqmQYjpXNNyssWIkdeKx0jfLH6NuPvFzIWQn1tWHfKo6oe3jzDds0OnQ5DFllQCSefI/Y1zbd2t/wAeBCiLACDWGzsjHddoAJOeo31eY4M0IZlHavZtILEHuBI7h5GlNluydZwy4FjceNbcbNaEBQwy2GeMbX9a5s0hgWPjvr2MUIvPN+f+9IfVrAbYrYqsu6mZaMetE5TZkDkGhWAN4kGZpe75Tl9Q1IMQRINpg4tbzNY6Z05L9/xWbUNi60VnTLCe2WjoL/SvJ3aW+LqOTTk7cdDHcIr0t3ydhbZu2gbGWEZR+2IutR/I356dTkDNSb/ta/hW18GO2Lb4pdBsb8fjspKXIUP0A8bVvy8tCI9ghEqwH4FrY+ddnt0BndCQSuSn9wA/iK75+073dUUImvHHWLiDBBPmetY6TX6lxDUsP4nzNi6ta7gCAhZNnBF+voZrl2nWNm/XYbAA208xycY8qk17shrCEzrmFi2LS2J+tM2tnrQO3aJwItBjIzPlasw0rNN89OkLO1BkyMHKHJXv6V2nZ7klhkWExwSAb39amOvfuUnRrhBwAP2yO/7ij+NIlzBViFnqGJ6DzitJtQ+qRh88ttc2z0xrRnQbDCO4XYFPEgi5q1lTeH1ayW1a1K+81grEZRfx4pHxvZyGzCRIkH8Z/wBXr0r1fko+1mO3HXqZYwiIKA4geJNeimqZww7PK+Npcq6bAFCDA6wZY4jtkfSqEHzFOOwK4T8EaYuIIMcCL0XtbRsVNZVwSoxEG8DtfwtNZs/tbH1aQ4Ug62ViC6sPxW1ivWqAkRoXdr+QulQBqZexSfwyJJB+tU6NJ2H29asjbnCEMR4Eju/aGiiK69b/ABXQQEcHdtBlrnu+3hVRddex/l6x7qkvqdJOD6p/Hxy7u3zp54Lro8vd8YqjgqvuIpJcmJM/tjwrzfa3fJc6X1jYqsGdhJhWGJJ+pvX0O3b8clH+TL94Bv3MkFR/8gb15HyHTW7Podg4YhosGXYO0VnvjDNcdaizydhCa3w7TrOGK8QOwx9KmI+ONh2fHDYACRsiS62EetUOjNs9o3wl22Hiw4pGs5bxucWYyR+0eH2rzNWj0LqOWN3MiI7FJ2HujxK/ypL621Kpk5sDkfEDr6U75BXdLtyV/IcdBTdY9wKpbhMp8mN4HpWoMTCBZ0Ya+i6yTM2JBovj/LDad2xVg64wIH5MWxMVOQTr1bGUlW2Pt2H/AEcAfcUGhmQqGVlU7Mcel7/pSqI9Fd41NvVycfbx19BDW+pp3xde3XpZdaA2Gx8uVAEj/wC1T7QSulxLSQjSLkiQwp2sb/cxJx1BI2g8ll4X6TW+WZaD0uzJL6o1g3RbiT3X+9Pg6dhCSNm1FliLHE8it0OW3bdYIQO8EDiMYmmfIbjSdo9vUwCNzz1HlWkZJ7O3+52QhVcmgHE8WFODEQA0BO9iRYz+MUre2pEw3lisQFTkMD/CnoQUVm/EkX5kNEUgwo2B1Cdie2wcL/qN/wBDTvi/A24jWJLbe3RBsHMDJvUVMdhChUJybLW88MCQR6VT8Te66/awDq57n4aOmJ8K68ox1gpOvf8AE1f7f42/XtA//kFVuSxEfai+O7omv4ryrhi7Mp//AFnuKj9KIawPjoya1bZqZizizYMPxJ/pFaHJfJZKoIyAv4Gn8mVaA2fFXZ8hty4s4JAP/kRkY8YFGmY1BscWBJuQ0+f2ozB2PiAIBGcji0/WgTBdmuxKvICg2ArFSa0MUnYrBRdmzEG0MORFAyatme5i2KBg4BgkciPtFGNbBSDK6lhCixxGU0n5G7UitsbaBr2Liqc2BOM+tOi2d8T2Ne1XwlEEt1aW6fSqVb3tvu617meXPLAIPPxyrFRAM8oVnAIHIyHaD6GptQ26Nq/JZ8hrca31L1J7STWXRpW7N37I3D5PySJMBQvRCeqisf5Ek6dSKF263xc8+3eS0+ZrmXVt2bVbSckllYHwGWM+FAPjuX1PBICS0mYVgTjFZsaLtLs/xtfudV7mHhwKXrdcydrABYAHErJE1rfJA1q2iMMVZCRMkDuW1IlXYESs65II/FmM2munjyc2s+CzJUdsdjALAZuQwY8/pSXCMW3pe8E8HiIpGsNqVV2dyMY1sPK9/SnLq2XC9ocKGY3BvJj7VvK+TOHQvcmsqSTlgJbZ4A+XUUjawChHXL3AMSZxsebeNN9sKxOrtDqyFWuYB4pj6UZFVWzUiQvBTrFc2m818nVOp/Y89tLK2CvD5ABGuAY59KJdrArq2drx3vFu6bkVrlgG9wDZIhCv5AHqaS67QQr7Q0xiQO4gR2t6RU6YIe+xo/uE4AfkL2nma3Zu9vXkSWPAUeXETQvoDLkn4Pa3MzwRQbxsKN7iqygALEiD5itS1ozC8jFjBXkXjGLeoNLdWdmXWCACGJ5xAtQjZrCDG5tI86aCGDhiVBF4N4rShoGmjMWV81hwAQJ6TSmg7lLLgTc5GwjimDcQSEghehvIrN7a5UuvIsDwT5UNEmIfW2QJSxuSDBg9RRe4CTi5JSRPiPCmPl7YkhmBAA6+f2pTgZBrWnOP4/pWZNQJZyHLExexiZos3RyJkqQchW7RibQAQuM9POs1FWMf1TJ9LUdGuaNG/dkUR7HmOAIv+tNJQ/KK7WIbYM0ANoFqxF0jV7aW9pozPXrXm/Oy2/JUhsW1S4It2r+361ybOqPR+dsXVq/t+Vxxlc3+gpWgDeYVxsZ5JU2BWL3rPjMWJTYoyJyOVwPD9Ka+tdPJGLwHx8v3L9qH5NITs2sH90wiQqgjhoGPd9BUHx0b3B7UqNZDf3DyQSx+9V/Idz2rDOwAw8wZJ+1J1HTJRmyZpOJ5AM1yZ1RRv+a3yG2tH9xzngLBRxH86H46610r7t8T/bLcCDcfWlbn1ndsbU04hAs2BUC/60bb2k9gBUECfxI8fWK3x5OX2PRRlqYtgxVgGLA3hxYAeVeOX2bdpdBDzGwzzl1jyirU2bdTF2gqoAR+Z6XqTXk7PvtdrmOJ4gU9xUmeJhpWOEIoUdIE8W86zawbgf27ATeG8azaMtebHsDYYjkz3A0hoMgEhTMiszKoel6tJsbo37tTKjNOpIhRYiJMelEWPuHd2jYSGcdACYkD0NT69muGVzJvEckAxTERSUdhiXALTwVtFY+ztR6tbOn08N9eyej6L4jIijS0NJk7MYYKonEA89K74+0tvTawG5tXcQTGskme2fGp9Z2fM+Pq9ohmBbED8pU2mPQ1Rlq+Lq1bHQOjPbUp5r0c2k9Hm6Vv8ggbl3qdjLpTX2HYncjmDBt+6GNa0e6NEnZsQwXUZMCIIv1tVnua9yf7dW16de05bVAHYV5pfxdmpEfagLtiwgDuC5DE/wCddY0YnYe346609hVXDcTkxMkXmVPHWmL8XVo0vpbf/YRWbIj94EKBB/IG9J+V8oymrZrjTl7YtAE5Fo560OpBt+O2t2Yaoz7ugDY8+RrcIyGmwjcAAiO6gjZOaHSe2BH7pvXz/wA7b7bqzGFJkwP6f8yK9tUOsawyf2tUhTwtxCARzXmf8j8Y7FZ9OtsCoIU/lJJn9K5fan60dPqj2s81nfau1lCygDPz2gfyNFp1vqbAbQ+l9XhI7hMDwaa7b8bZ8bRm79mzBD4kKwbFvK1Pf/jXT4+vbqYlduLe2pgrJN/pXn55cuVg79PmFDVkuvWW0s4UwkKyxaJtR6PkKiDZ7XtlOyGuTEf41vs7xr1NrYnVsY35Pb/WB0Y2FduWG1DYQA2R2DqLf41qIsxkEbF2birgf7cQqDzbpSd2ojHY5PcezWOB0NcuotqbbrIOsFhrWbhpsaxtuCs4JDlACrXCG0keVYZoo27HVD3Mq6ig1BokBmufsas2Kh3HWxPuOpa/AJ5PrEVAoDq2tu/N0KE/uCCTTvkbQmsbMsACSrm8i0T61rlmWP8Aj79fv+0oKlSoJI5tzVh1K+ptaKC4dVGw824WK8r4rPudtswWufoItVaK7fH2HOCZYdD0vXTlyYdMfsJ/3GyQHIuurrwK3Zs3EAKgTTGQA4DDpQLDbZygGQm3rMf5U1WlHEArixRT0JraU38hOvgcVVQmwKXEKSB+JyBmT6ij+OWX5JRT/a1jFWAsA3A+9dqzXUPjbXBSGQKtrMJn6Gqk1bAp0Yga0MnH8nxMLW0tmG9DfbcbCEUMTKkk3IkGRWIhdzrQkuVlFBju6T5UZgbVQtdfxB8z1ofka9yay+iPeLBGbrip/hV0KFB2O5dOxQJtzYyZJ86Fv9ygGpdqqyuoWRM5HgRTtmrUNqNsuQQJHCgW/WKPQ4Zhr1oHfVsIDtbI8iPSs5FhasNGsfCgnZll7zfuLC6HytUCqx+Z/c1AKQXj/SP86sbWiAZMTYszN1Hl/Kh1Atls2Nc92B/aC3E+dTVok8lI2e6QrLdiEJAgG2QJ+9L+Rr1I3+62nIJJwTgkdoyHnQ9u3ds+OpYMSPdM/jIm3rQbtWof3SC8FdZ0iZOJgN+smhxDL/kXoDa/lEbiVTYpGueIjk+VHsOzco2aQVcKBl0APbFNI16QuvZLIFJ1zyAD1pjuV1zIwmNkdZ4rKUkxOjVrX44+K5ItKlfIwR6mK3tce+TwIg/09aAuXKuhhdYBK9b+NAQFaNZzTY0ITxB4+9deYizLmTdbrtBfKU9xxrjgLZaFLQNjuqLkSVuceY/SgT29Tf7d7BCyCOpIyn0NPR9etYjLUoJRuvHJo5ckwH1MzwZLYyk9Mhau+QAGiLKqgRwTab1ux2+O4cAwTGJvyKF2LaiHupuFFip6tW2lAKZ+BO1ldHcdjxdh0J6V3tD5CcwcjgQLhuponQe0uxVsy8Txeb0SstghHAmPG5rCVwzTxKMXW9gw7wcmYHkTahdnI2qwzZZj0FEwLHslcReTcn9tBq2I2l8hYEk+Nwa18GfkRr3aWWdn4EA6zEGtwxhtThli8+fFG2t30pjwoAggcnn6UlQEWHENwcfxPn9KvyQTjEszjGDGQ86Jih9ssPxaRPEgc0OwZ4wchxl4g+VKXbcMGkBscSPHk0vBKxi6wQsgg3j6i9AshS0C3HmBTXfWFfukkLfzN6nG7G56NkfpWJNwHuOvY2JXIkRJ6UGvW+vXsJWXUGy3saEbFzGw3kyR0vT1J1aS8w0gW4vQ/LGCZvkONPcuKa2lgbkxUfyGD7TtMKAsg9STwIq3Ys6yUNlGDT4157lp0lk7lxA8461yZ1LtG1h8Z3ZebOet7KR9ap+Nt0PrH+4XFpKLPUgVBr07tUB3se6fNTNFscEYuCuPcoPU+XrQJ3yFndmiqZZkmYEBTer/APgNfwdm3ezqH+QrAageLg91+k1Fv1WDBYsCb8SKL4urb7qeyCN4U8GAVAJJ+lYas6cuBXsajrcs0g7GRV6iYMfpSvkDYSyyAEAdU6mOoqj2zr0bB+4PkJuch1+tSbS/buIylSoI5AF4/Wumjg8sddtDXBgAjHjjmg1xqXYwsg1yGHVgoNPT29Ooa0EgixHBnkUg7VVG1RJcYhfKTb7Cs/YnCOn09JNyTxtfUz5A68wfOYmKQwZHyIki4XyoxOlYIhpDEeZ8qaQZVdna39QvY8ULmjHXU9SRErKuFNmt6RcUzQNoYY3UTIa/P7RNNYEqdS6grOQQOTMQRXMyadev2mOvcRGxHEy2USD6Vj7E4q2dfq7ScvGT1/8Ain9j5GzWwdAVCoyCGVyf3etWfI0bPkoWRguw7AW1C2JQCeP6hS/+KR9vxX27WV9hadn9ZBgCmhtpAEMutGDvtVuZAUTXb6uY4SZw+zqe215CYAbdW5kR+wkhRAYf6/Os1fH3HZq2H+1KlASZBUnKAB/TFMJU62F4ykbTcsAPCi+TuVtp06QZZRsUKZCCGUr6m1d0jkwFdtuwN8jE62ZGwUT+IuL+tNQnJ7BkyDBTMKP6bG80A+KWGpwrac1HWcb4sT6g0e7XrYg5QphUAscvx7h9K0gEt8rEsm8l3aI1Ja8yG/lWbN4QFi4OB7tXUo04P9eDRfI3oubAEopQ58EsGAHHh1qVlLncNigK4GsHyHcZ8PGgjmGveiodeOQLNkMgFHCjzIpG7Q3tMk4sVCMbyouTbpamHbu1bdB+G3tqwDgASTiIJ+oNUOuv2fdO4uypLX7sx2jL/wAqPVNP5UCnDTiYZ53/ABnuatR2ISqbNgTYg/eFMoZN/wAqfu0MNqP8lAdxWNichpk8+lYSu7Xq37ji6Bp1rYEA8/8AlWb91k2B2hkkdRlxj9qx6xzHg03PU4nR52742tNZ1LCoCHEGxEXpaa0Pxl27NZy7g8GQySsQPWh+XtCMUUZqmwqPQ2im6ANmrIOVC6zjr/qI/aK4PJ2WBfy01JgofIFJcjxtMUvF9ml1xhWRZJ4CC1MOGkbUADs6TrDcKTzNCj+98fbrFlWEYTwFAP6mggtcFdQLQA4Rwvj1q846dj65N0AVjcec/apVQqAuxSpUF2xuC/MfrVGjYH2B3F9YlpvM8105RjobvTXrdQkoFRMNczLdTPnRqx2RrVbi4YWgkcVI+2TipICgxHLGJAq3QUXDZqBIyxdT0JMfoK6cmHQ9Ni6yzNqysArT4kT/AAq7S/ZAGLqSzOp46iovi6th3Ee2GwAgHgk2t61f8f46Aan4NwwnqeRW0qMt2Uj3dje8oxhcMm/qHjUWzZvT3k1SWYgAmwkfkQKucgaXyYa2yDE8yBcGKUdmkOdrEOLCSPGKyxB2bVhCQSz4jareMggCtbWM0gjoQWiwmZ9YpKY7G17CCFRmfDqSDiDXfIGp2JA7zC65/GZgt9DUhYzc21wuzTqzGWOvWSQQBHd6V3+4w3nSBMj+7F/xrTvx1sTBiED8dL0kqC+gDt2uGZ25DCDFT68FAxyU27vlscZVQmVjI/dRxuX45b3AuxBnMQIYjITWOc3wKB0RQST+4kQR9KML7y7BkPalQFPiBx96zCwU7Jm+T/u32M6nNe0+BkTatGwqAHdRryyI6jixotjHVuBOqdYbFm/8hCmiOv4x2trYCCQG63jKnnwDZyvsxkKEJAmOXEdtA6ppQqzZKCbjkEQRHpNNOxlJVFBVl/tk+VrUhdUvrXbENNwes2rcQlAJ2xezbo3PpADBnGIMf/sHEn0mnMwRu0ZI1r2E+H6UnbqI1Nv1nHXrYMF6gg9x+1GSd2xm/brsQeOe01KbKjF2PraNnehJMHpPEU1s3hljtm/kIqXblkNLGcO5GHE+tcNzKPcWysYI545NK8kxsMpOQ7TdwPDpSderbo23KjWQSH5u3Q+lOVyzSPwH5Tzeh2p7Q7mEHr0IN6mtgnoFs8w5/JwygDjt/dQysNgRDAhvGINxQuMyHJ/GQUFpDCh16HOsXKMobEDiAxtWW2aSkPRsBVX2SkqJvwPGtntcT2sDBHX/AKFZqRlGO29gPpHFE2tRC6ySoWTNo8q1yZ6QpiTrGJiSASfGKF0dShWG8PXrTSWA7uQQVPpQbGMSe2IP+NXRLyIEhmi/BPrEUJGSkrybXpljOF4EennSicSGNivIrOjaNyVWXIWXtdfFj/hW5j2313hSCG8RzUx25+4zftBA/wBRkU8Ftqqy/wDrAbm14IiubZ0S8itjqXRbsn5GPGKn2bNb731LfAWUeIiaqYLoCDEzssB5EWqVtZ1uz6e1wAp8yZJoYlCZb1RRKo5AAPMfiaJ/ie1qAVy0NMsbgCwoPj7GdddsX6jzBvTfkDZrX+y12BPfxPEUD8DGCEGTIjFx5ik6vk+0uzU8NtMYvMFVvMUO7f7Gsap7tndB5kDxpSbda62f2w+1ZxQjkHrWHk2sGbfludRQriTskP0I8KDX7m3dj/8ArQMR44mP1tW7PjPOWtxgzq4ysBacaK2tioMOT2xciTWleTk6dGtsyADAr8cZQRzAFAg1mNg5BzxPh61u72tZCgFlvI85vUq72c9g/tzfxCHrSEVGCt2QH3B3lYsR0NIR2GvMsDsBLhT1AvS9odA4U3HaHHSbj9Kds0+x8bTuBVx8hcggPcAO0T4Sax33B0+v6/abwBrdvcVnF1JaOptyPpV/w/iad6J8v5TA69ckxcmLx62rzBrH+4Gx2IwTADrmoxNel/x2wMraWQhYII8esgVfXcSH2L1cId8c+43umde7ZLdvEjiR6V6OvYq78SofLV3AWAVQeR4zXj/M17Pj/O19xOgMDpfiQOJ/hXr/AB/jbO19syjdrdSW/YQOkGu/DuDj0g23651gKHchVBHQk3+lJLe2re0PbKNGwG8iLY//ACp66wrBHIUBSvqARJqXYza0bU4PvIFTaVuWd5xYCuhgsbbkFXYB7pRCSOLdP1pez4qsyltmWs5NqJP7icT6gRSTrfYN2rW5dNZKgmz4mJNZi7sqEQmoN7InkG7MDSQt0OhlUPmuwEbOt07resVEuzZ8hxsUt7TnJQ9rg8n6GvT1NrGpdewKSkNBMEiSpqTedeokBo/ei+pgqfLrQxQtTtTd7qbJJAK9Bc4sB9qNWGvWW3Q+skBmXrB/En/5Vyke62RAc/sH4i148jQLsf2mUIMlbLHoFtDRRImn5BBVdahtJJwtaTF//rQ7ZdV1PAyIfWV4kntFJGpB8cj3TAOUjhGN7fwNbinupsZyESCmofkVN5H1FWrLcoj2fG3Hc6N2BBcRwSefOh+MN/x94gglJKZcSwF/pNei/u/LZXMgQA4PMjkGkHAaVBiSSMmMADm32rh1xDOi6kj+QEGPaWbZGY4gn8h+lOXXrZNehQGOxSGx4i5uf0osPe3iSfbZ2OXWD40z5OtVVxqA1Ce7X+5QOT9RRAyIx34EIxjWcsj+7IxVXx9UuNTGHYmWFpA6/rQrrVTibqRjEzDAVibZZFPRZVvAyVINa5pyZZmvWNewe335SB5EwBXrfG9tA7MJjlR5HFv1qP4pXVtgnLXdSyi+Q4YVam7JvYVBhrUs7cMSZj7kittRfyZdnKcNujaoKyrBV8CCYmqU3jadSNrIIWSVP7z2mak1rsGPJblx6AWFWrrx2MFkHb/7I5BNSbZNJB7G17Qu4qSEBWD1tFdpTNV1EAtZlH8zXBijFUI9oZBgbx51mTEAk9otlwfKtRIYNwx3bGcnH8QfE9axyF/Jci/bEwBH7v50WzFlxPWQgF5Yc1OFKlVdSSLG/Mm9UXBTseqoyewGBHaL/wD0oRo0si5FsNauqup4xat2qNqFls09B4GRW/BYKzaTdtewlR5EZT96Ispqg/Y3ShBK7SphuRcmx+grnYKu7ShZX+OANp6MW7hHrxTdercNbAuS7FiAf2g2pGxSm7Y478lyaf3YWUD0qhyCdDyTgNTKQAMiW6kQ1vvQMvuL7iKFa/XxHNA+3LWUJKlQBk/iRc0OsbRshY9oiST1EdKVkAQ4XFVH90QEQ8A9b0SMXcQAILLfyE0C6USNuxr3Pt+thWEKYvHbAH15+1au5JDNQZ9TZqFBEEcj1rQVOgmQGIhhHUWNANmKqWPYbR6UORUMVuzFiTzI8P1rSUgwNauukKSGeZnymgJx7HAJJJB6EU7YrMhxHcBwPCOKSVO5QhlSQIHgDzQ0KfkzTs16zYyCBPX7128kHACdajLI+E0qU07hqcTbHIfutansQdZBErML5EzY0WNHK4fWrp3YizxE/wDU1ys+BiWUGCPCTJpOvNSADCcIP1o1+SiP7bKVWRfxJsZqhZKXhGa9uqDrvPuFQObnuonZc2LEwZBHmaWQNm3PX2lWlR9Ik12yU2BDcHknwqX+gk0sMSX/ABAnxNcX1bdbTcwIHlQhluvRrg+VZrg5MAINREtm2kkkEm6ji1EwygQb/lPBpjIrkSvJMjzHSlnMtBNov5UaNkrqU1rJgZXHW9Md9mgBS09uR8getDtQMXLCSP5VqaNuxi5aHsQp/p/71yaOidFKt7xfcOFUKAfO6x6RUnz2wWU7dpmR1mKfr1htq4khNYgsP6lBpb6htOw7371WVboZkyKGhFK7BdesiNmOQ9TFVbdOxxr1NYFpB5AETUnxtfubfZ2CSkkseZAEfpXr68eCctaSwY8W/wAqik875SsyIZBecYPhNV/E0Nq2D5G0B9TIQir4k3pPyNbnNGuHMpHpNI+NsZwde0mEEoR58fqKy8m0/wCIrcqf7pvj63bYhIMmyjG386AyikbUK+0Gv1JNhW6k2HQfkEkMWhgPA2JofkAkncX/ALZQ89I8aTns4WQtMkGPqetIYFCojtKXDWgedVAttA2IrLA74uOOKR8jRsVTsZWhoRlPTwq0GxLxACEhja3Bi0UOtxrQrsXnEKee0GWp+k/G3KFVfbdSGBPBFgaE44uUH9wGxPBBrHXKZvjp8ugNBUsdpBV1DRPUwB9717P/AA7e0G2NJdYAcngmxn71F8EaPl7Ni/ITua6n1uWr1/g/GHxkfXsYFm7Sx4xYzNP18NOQ+3v2ioN+V8PauzR8hR7mhImbi7ZH9ado2bE+W3yNSumchpuRebTxbiqPj7tmoMoxVBrDJnyW7of6Clvr+RsVTLAlS4JNpAZ5PqJr0pJHnbk7/k95D+42LZyoKdWkEN5SBS9CDVu3a3bPc8bV2kyBlMD7TFTOzsquuKo6nDISRiAsnw7bijYLpO1V1MyjBGUXgx4+ZIrRDSgDLp1tizLsz29CTSkf3dSkgawSyox6IoCn7tQ/KnZA1oFXcWbWimWSe7L9KQg2gPsL3W8cwpF5Wgill+OzO7r34nUL8AGofkrr2Ha8hDEaUJu4H5Cnps1bdYdSGV5UkckC8etefsZdTNtRckyMSOCYtR06NQPnQ6w2zEBSyEcgxiENcD//AB11kEPZQw6jqs+dJRVbXrfchAJlkUQeePvT02suIxCsQYY/jkpuRWRO1ts1zrZSwMz1EcEmlPhsCd8bAhYOeALrjVPx9TsGZ/3MQ0ccWpTh9O4AOQgJxAEgTFjTNBBiFtesa0a+5i6uf3eH3rzvk7i5Gk65KzCmwluv0q07tOSa9hLH8BHEKS/b9aE6dCOX2GVIgsOQxJrn3eP1N81kDWxXWm0A5OcHHpbL608/+s7NhxdmBLN1BGN/vUh2gNqRgRrYs7OP26z2I1VAJ7xTY4Ox2BcdZiP4VlMWhW1wdLMjkMYs1u6IMfan/EJfcnATWcdlpH9Qk+tanx93yHOrVrDxIB6Ywe6qviatfw02De2QMHt47Y7q1hmcoYmrem9jpVSjiQ8WBUxxWbdL/GTUmxmO/MDZAmVJy+wis+Vu3NpQfHjWSCVPXtPd+lWgyoGJIuSeTEcnyvWoTTfgE4O+OdQLY2fVBLnjuEz9qendsX+4S4MsvlB5rzTok629w5bGAePxhR/lVmkzrCzdQJcdZmRUvAtbKFXLUHVlAZiY6kUBUrsM3VrAdKWmOcGYQRboTTDJjEy5IXLwvetow/BocKR7x7QQ0DoetCNuQExkSQSOJ5/hQ7n1a4ztYkeXmaTs3adT6sSVYnJIEyeDU2ihlcRHdYwZHlTE16EfWyklxK7IHpEmlFyGXDWS5VRl0A8PtTnhDksoSJhvAVbABvdX5OzukixvaDesG3WdQLCMOnnE2pG4e6RvZiMCMo64/wDenLkqOuoBHJyVzfkQBTsohGLs1ugLKSplAOsjrXbw6QqCXJkDwED+VDuy1ljgce4K02Lm7GjR1Ghds2tnPXyFSRMwsjaPcHcco+1DiuTMqAkW5tRe8mvWcUgOSVHSaT7xZsrZRBHQAUyCQzXqXYiyFHFibc80TOFv+wmWjp6UCdrWE62uVPlxWatwO/29q8iMF/aPOnRbA+VsGsdqsV5mbyaHUZcdsZAsL91qLaHQ+2R2zkCOs0pARmyPIBsDzHWqSFbmO8uUAADdp6g8mt9p9JRtrkk9ehnxpWvcu2Y7WUkkDj1qks2xQWOQcZBZ+1ZUNyLMLDWQYkL+MdZoclZ0EkX5I6npWdiaimWSkzl1BHSuVj7QYywHM9CeKiCZgjYsLsRccSKHYwLEOZBvA8RSfkHJVV1KgXgczEzXKCVlAXUAXHSkhzMMxiQomAK53AaIueQOoHWhjukjobelaSR1HgD/AP1qggTBCtfmDj4CkKMmdgfEH/41o2MdaNwRaB0mt1bECkmwj7yKxk2cYjMdzAAz60SOyFmPbuZR3HixmueCCq9OnkKEMGmBkI7zQ+dinYlTt2KyI+MNZh1mWovlaQqh5bMqb+nSj+PpVfcVAQCxKmenP8abtO3Wqlf/AGG2Jv8AlM/pWPybJl1EqNmsDHWCzt1ane9q0LAUklclA65dDU+xtuv4mvWpBR3PueNulESMFQ2KkKL8nlRWUacG/N+S2vTp2aX/ALhOSk+I5BrviYppPzdq5Zti6eAN5FI+XqVCup5MHIec1MnyHOxYDHEMGXgKsCD680f+h/8AIzZuU/HYKxGLMbWtNqQXkjIZSsX6Gp3GvVs2bRL69wj6xalahs/tu4upJPXnxq6ZlI9f3m+PodiLAKG1g9QbfxqZvlbt2xsmJRSshTKZSIip1Z9hCu1nAy9MqZo1gODpkoSCR0jmpsDd1/lF8GCSQV6Se7+dIlldiTKzY+NWIze4vuKoDjE5f03P3qNNiK0hssenlQJ6XxNa6tiwS8Akv0ANsa9dNZ2aBrDkrrY7CCYD815Hwp9ksCfbtJPUm1e1/wAf7XtA7TLQe2L5ciun1qaOfY1GdPj6zjkWUL7LcFVk06Z9xTqKhhG4cjgwfpXbtw2ImzQkKpw+RawJuY/SlbN7bEbRkEDBr3kiTMnxrsjmxBGvXrZLtuwLqoHiLKD4AUTaNnsJs24p2Y6sTyx/qI545rdW3UqHS6ZbwBs1q57sVDQlumIpK7tYLfGaXWGGo5dSAwP0mKURPuJdzv1n2nWFVZk4iwK02NmvUSVGvdrhnM3ZZsxFdvRmXVlryJLYRf8AG+JjgwbUrYh3bi5cqrkEknuhhg2R/p4oIcZ2IzHBArDt1CSeBYenNeT8tNy7FQMWJfHcIsMbho8e6vQ0b2O1dWsKjgxtyuCFsQfS1KyO3aSVl23YuBwSv4geAoaNAnY52FHUhB+8dVJAj1mIoS+t3bSQYIBBPge4n70zY2kam1Ats2KDiIgNH7jUgParixCn8byo8fSsiVam9na3uEnTIII8U7pH8K7WdzfKTGXD9rQOCbiKTq2nZsQLBX9+xjAGUd36Vp+Q6ztUlH2MyFv2FxFx9KQE7dHyDs3BbomyFIgd79fpFO+Qp/2q48hZkiTkaRrc6t4Owd8glIJ7mP62FUanO3U6NB26QBl0YMS36VzcXZqXRLvO4EfG2QFUhCE5ggc034ejXu3bdu9u0RkB+TdIH0oNyj2djsYYpA8ZHn4xWfD0/IJK7HC6kXXsJH5EMLfURWVEmng9V/kZJsTXu9qULf6pB4+xqL2W16AdobAAlFHUESZp2vWA2GMlRKN/UCevoKc2k7Tr+Ouws2hcQD1npWu8GeclunT8NNGnfuJOMrY+AXkVmvbs1Aa/knLYEC7Y/wD+clkH2ofi6EHzdi/KBh1UoBYW6t61T8oBd41qciSVDAcAH+EcU27wGKyI1trwGpIA1CNeQ4yOVGmxQra7xwBEcUWtNV223ZlzAiLgRNFPuX5n8fHI1rlbJs73cmGxDkTJPQeVCHhlANyGLCgcNLduK2iOZa80je7KuaEKwlY9a08GdlfyW/3GlgVvzkBJis25kaswDtAUqoFrUGrYW1o5JDKLAeMXNFs2qSyJOUWJ8DRFyMsboYlyj2mGC/xpvytjHW4sdfOXn4CoQ7e4JgAC3kaJmD5KrlhMG/JimA3Jq7CQq5YhsgxiQZFOLFx3YyGxW8EL4mkMU0gIwsBZT5+FYCpuRJYXbriPGiLksjjsRtTA5HoI4XHkr5Ust367mAMgT+tGurUNjFmnIiwtIjp9axnQnJBDLZCOgPT9K1oNim3bGc5Q4FsBxBtXaySCYExE+lYHeSygDawhfX/tQMzBCWXraP1qIcXP+4XWSYYACOhA61uvUg2B8wHUywP7sZrNJLQWJxIMEC80JDqdoxmVgRz61psjNoCSxJE8DxNFj/awJibN5Tc0MQcplYgCZ4H+NGC+SwQeOf1NWQFHXiAyAIR+QHMxFaoVgVJAkxkfA0UM211aFUfi/Q+tCV1swTX3PwQeJ8aogZkDbiMgRK92YHgKFGU3UYsv/wCQrdpISVEASHJ5I/71IgKN7bFi7ElX6Ai8VluCiSosXWTBn8W6zS9kIgm0+HU0esrt1sCLiZA5BH86VsQZJrIOagHy5mahCZiyhVsxMiuDrye6TBn+oVkY5AExbI0N29wuQFtIHWkEK2d7INRIIuY6jzo9OrAQXyWevQxQrqIKbWaEIjNePCKNSSMQZ5meo6GsJbNNjVgbb9wAMEdSa6LBlOIa30rUgBbRHPhatAUwvXnyFLwSdggBB7ev8yJT18KYMnbJzJDCJ5kWj0pJGULmchbIdIMzTEUX1EmUEliPynhh9axB0TJtuoBmBMMCcVHAPj9qofZpLa2gYAQx84ig+QnuFkR8RqILCLt0N6NfjLs1lD2gwXJ87VloSf5O5XcjSe0AHuHQ0v5PxT7oaMde0dxA6/j+tUncmjHTsE7nYf3DxHFF8rfOyH2TiuJWOSDaPvRF2LdHl7tY1fEREXEoVZgbwBM1MgBVoIIjJhxYU/5nymGhg4IlihXqcO7+dLXUvskI02DEnz6Vz+yh42R65IzQdrOQg5IFuPvT9w3aEQjZJQg4r4cf96d/xQZNyuwGGqGRCLR1Nduf3NO3Zp/Fmcg9bmtakzsDWjbnCO0vZsfQ3pYZTkEVRs1ubn91+K346bs8lABABU/6rRNYfj7m+a2Qj3HkOsRPUCsuzXLSb/B6fwH3adIGxVIIJHWQ/U17GideP/3HmDcD9K8r44dW94WVDiykWjoa9L4S7NTHO/cAwPIUXn9a7fWceij5C7ANWLQAO5Rzk0GD0MA1Ps2smDSCjgkjiGnpzTtwZ93bqCupVvzhSt7nLqePpQ7dLbdbP8cd0H+246L0AN5NdTArYjMqb0gOZQtFsSeH6+lSbMNJnEr7TDHYoyUCLqRzxVuzZtTT/YUlig91oIlJBZwp8Iiald22f2nYHuBcyAqzznj5RUSEB9o3kq5IIXa/tm06oMqOlMncwTZr1g7ASuDf0mC0/WuJXWr64CqrMdmxeCptb7/albD7n94fJVSRkNRBkyLifKiTQzXsCLhtYsC0DZrUSWcZu3pEUpSrLtV2B9xWYNdRCwe3zmuKnUFfQ+SASFIsQPyif3T0Nap7WmVRBBAORBP7TPHFRIHWfcX2nYsWAdkIuMfxvQ/2ipKoVlA0H9oNybeNZtOBZtgnYxIQIY7ZGQbzpBLlsWGLEWUki/FZYjh7KsWVY9sWU8BlFw0+tb8qPj/G9zIqg/FGuYPb6TJFHtBdFQlmRyF3426qGN7mIpXzA26fitfVqV/aYwDz+XnHFLVMlkh1tsVGzaJwGQNwwkwKb8T5DK/tviqTltmZhuo9Aa75Gr2PkLrQhoQFHA7WUr3H17a0l9exfcCuzkIoAF8jj94rg5k6VFGfIX2tShiXVthGpCOvRvtSvjbGXOJbWGVX+h7gKt36tmzZp2a+5l7EU3JIBDGna/hnXvQnuVIbEcFweo+tMWZmoLxoVVL7VuQGTEwO4WWPIc01EZNghwTrKiw5A7qTmdm1nc2ADFYMq0kZDyqpiFMlu1pLPxFq6QnfgyPJd927S6rLdvunrbEVo0QNJAFgAReSASJpayF27iZZgI8AfGg27/aKH3FdVEMAbkt/hFOAydsYMII7wMJ6XNhWsp1JjyyGQOkD8vtQgjGT3lgFk9W8ftWbD7LjK/uCFXkCefvWkTFjYxUENcibnm3SksfdABWbkz5HrT3+L7uOwDHC3BgFuRWIwCXJ1ssqpixi0Gi9lQaE6wIA7V69QRBiiOeJKDImwBN78Ckqx2KMu3tF/Ada1UB7Wa4bLtmeLUrBMdYOPcYSVNvEzEetM9satkQBfw6C5qP5OgN8VH1MQ+siF6kFheqztZihi5PPWOKuXbQNUcdklgzggGQI/EEdfKvPDF9TuJVtbA269B9DVxRg2wL+BuzEi58Kk0Lh8xgSQGRoB/EcYmrsuQdD7PZRcszk0ngiTanFp3QWgOAoI6Ec0OGDj9wJM+H/AEKHWoZ1GWcfiRxPU1InA47AXNvwPHpQdq5rkwJPaPKhyBRvUwf5mtym7Xmxf/CkDpI1qAbzfxvTdu1EGJ/E4ho5ilNAIAUsrcMP0mhJK7QriQRz/jSAbHRqbEGFAMH9rSaMQEGw90yCPLwBqU69gYuL4mQP2xHAFMbYTqPbhjYR59YoTYs1/mKJyEJIgevE1oOIyLAAnhfHqKmCjYpQED+s2kRBt9qYmzEEOASTkcR1PFKbKDny2pJJB6A+INIOTOqSVXMZdQB+405P7gsQGyMDk+N6Davt+46CQIcwZM1lmgEcLtZZKBh+TdSbSa1NjIwBE9GEybWtS/fD6di7FBY2YDgBvxiiT46f25J9xIxM2iOGonwBS21CpZgACP4UhyuuJGRaIby5NMcL7eKXf8SIsKzcVIVHEKBA8pEV0eDKOCSuKgqnAHI55oh0xJNoFo4pKsxZtexuLn+NauwE43JB/ISP49KwnRpjDBl34PTzFaTh3KbEVgYSIHNyKAgFSBa145peCRocg5ckXI8QeL05t4RihAmAoj/TUw2YdpXIMATFUPu1kKGQBjf1BHFYNCxt2DcchmoUZjoQDeuGx2X2jbuVCv8A5C9L1lA7ohDC8jr42NGsBgyJBNyG8OtZaNJmbtusb9abEnWNihnP7fCajdve27dokYuwY8wpN6p26127wqkAMO8E+HEUxMvhG+LBmIckdSKNmm6IfkL8TfuBLFuuJ5BP7h9qTs1ss604VJceIHBrdn+2K+6lgdrqpm4JIP2odvaxUdza0UFp5U1jpSScAq6vmmt8gEVQYIP0o/jIo+KD7nJKsp5tSl2Kuzt2EgyHHhER96t/4z42t3bW6yeNu0mRJ4irm3ANh6PiA7AmUl5KBiOkQrUJ07NP9otGLme2QCb2akna7/J2KkNDe2IPbAYd1et/yHxl0pOoK0uBgCbk89KYpxoG8GIxEtsAJKzAPUenhVGoPt+Tm8uIF2uCIvf9K8/XobNdyG0HIcx5VWX26fYVGGWxT1GJrpz/AIMMq3bCVC7kYfG1FWnXwzyWViRci8QKV7iodq7Uz+SBKsrdpy4B8gDaj1bPYxbOWAZmQmVzIjIDyqXZm3u69TorbRj7jfdgvn4V1kzBg95dY2iGIBDa2yMg8Cw4UnpQ/JKIgc7vbB/EYkEMfyVpFytaT7YDn+ywGOlxJJZIU90QRPNMTUBluu3x2IkmGMnn0k+NAkBB369pLv7pYliw7CgEdsdTau1oFRliVFlIMzkIytxzTvnBN2zVqg6VBYagDIH7otUhErG6SJAJFl/G1xxas4Ep2PGTu51jJuAQwfgEzafSs9vcMrMNyBGMQGIeS2cXnio3+Snx0Y/JZgoBC2yyZSMcqpHt7AiaD7oMN/uMpOLA5LPlUmQz5E7NZbcAZhImHIY8rlA6VE7ttY+6wcpbv8FifsKd8h2KjD+2AoDCQ11AFpvRFTsTWpDCOQqg5ARIPmTUyCOgNsw2D3MFGAJICH+qPKRNYFXEKRj7YaXN1FsLeIrGRh8dTrKoisIQydskYtPkQRRrh3rv1k6vwYTdjJxA8hSRA67gUDuW1KccjaJPafS9d7bPtZnIVdZOewm5JXJVHqRzXo711rpxOsnXJSSeSBkMj5VDgrbGR+5yBfhSYgRPUc1y65g0mUfD+Ns271UvK61ADTyG5+s1fr1bP917ewhSitccEKxuPG9L+Gp0fH91NXfgAqi5kf1Dzmaz5D79gOxJZ01FGc8KpaSB5wSDTSS/yFyUa9ur5A3wVChsNZH5MRdT6Gabu0o7DY5lArIV6HiTXl/CcrtXTubDSEK6yVlhEMD9K9jUEOga2ILkQjmR6hqU00ydOAS+vRrkABCcUKmWJETNSbdo2PGGIkFvOLUvYQpTUmsAkZPeYA4ING5IfBzjrMAkCZAvapWLocQiIGIftMjHiD40/YHYqyQTe3QkDgedTaH9zIbGkO0opPCjgwKergqdYOWzVJx4FzFvOtcmWFt3Z6yILAgwTa4pLMnsgn8ZAYTMnwFGrFk2K39vWIjrJC3INKdT7KsO0jg9AT5UsAdYy0kIRMEAm/afGma1xhRJIAkjwrNTe3pbY6xI7lHXpb7U0YOi7V7CYhYvFKJmsR7Xtzi7RDf/AJRQqQu3kNEHE9JtBpLB1YjaYAbIHoQbUzWmz8UWGAK6/AA9aJuSihpyGXgf2joRwRNL2IzALJdgS3uEePT0FbsbbrUhnEjpyeaBtiqoeC82gHzrTjIKgM+/EHgTA8+aLU4zCiQrcEdItQuuWwtpYDsMg9I/b9KwMdbKdhA/E26sTEUSI7YpCkqgxgUvtLgoYBg5HgeEUMsZcGbkBf8AxsTQtkv4iAt1PgfCpAN1uo2BNjd54IBiRWbnK7GOYI/cI/QUIdYyYQwNx0vzfyoGnhe4Xh+keIpI1XTahEyQCVm3jSUfY6O+wCAf7Z4kRRAH2iqAX4U8kf1VhCtqkAMykgAm01kRR2wQswIy2EjxtH3p7bNqkBcciRccQLxS0DZNChcoVi3hHSm68ArXBGuCRBJIP0oUi2jtYaS5UKGMwCInwPrTdh2mW34AsQqon4x6ikOBB2XZdi3A4P8AnXKybdWCBcDF7yDB4rS8BsVq1p8hSNfaYDtrP7YMGjGMjAEALDDkgg9azQqiECRiIOxjDQD+tN4VgQ0k5E2i3SpKgbsxMh+cQRANZtgsDHESOa0qzMoay/kB5muOIBPECVHn4UgTbAVcwhmRIJn1vTBsDGJOQBsfCju3avhelMhCo4P4mI8RWTUhw3UxNEpGUcSImhICzJyk2PhQFjla/X1ikBjKbdOkeVGpvg8Sv4kUst23/LpXTFuOpihoUG2rXqBhSvHd6A3oi7BUJuBkJPSRANKdyQeSi/mPEEeFdDMilugGc+QrDNoSHT4/y/d5Gwqt+gIuBRfNVb5uI3HMK0gQvS1YFG4qSkMj/lyKLednydOgkEONh0sYBhup9IrBvR5SfG3OrbgiqGzMzYJ+7nragyJQhbIq/kbkA8Xr1U1Lu0bp13VmAH9UGvPBktqHLQfIDwPpWWrBMm0viZcZMWEt6jr9q+g/4fJ9O3UNeLvIHja1eZp+KsH3CCCkFepiYcV6/wATVihcP+QIie4W5p4Vl06IP9lr1/JjUWOlwfxAmVNwK9t3VkXW5ZWVAPc2AA8//wCVKGpdetFUYEEYsbzP+NWbtY2BRCkwWBJkZgRMHzrfPOTDeBGvUoBZIZ0JPaLTaxnmkfPIYB2xEQIUWVubCnqfj/HZfeJLXe0iPX+dZr3am2e04V1VSARa/NvE3reoM/IOjaqqNmzUSE4IHJtkp+tFtTWuSmCWHullW4xNvESawhAVLH+yTkgmO+RYx6UY2bFKnWAmtGYsGBIjkhZ/StICPDd7abT7YOhV1NpBOOxFJY7u7gsWmKzW87c1IBJB2qZGQPBK8SPCmvsZ9Z1btQIcyGIiSbcUhdr7NueBxZUXYFiSy/unyiokLcFDgMSFDF9j8BlMyCDw01Lsb3NrSO+AFVZxLZXy8oq0/HVgSFnUjYlF6Hk89KmVXZ9rOApUlcicQxAtNZZoifcfdTXtP9hFGzfIE4/tK+RPNWKHwz+KoVmE7MQMYJBik7fh5ls0LvdmCSFAJluOfSqV9nTjr1qqBIK4mGM9Wn91+KkoKSc7NWzZ7ms5MGEsRBx8/rQAn3kBgDWwlQ5VmAtM3/Gnz7jkgAL+YSIgCBx51uGlNjt27CikSQLGO5TVBSLUf2pXYynW4Dg3JJPHn208hdm9i7wciSnAgntmkMupT7aaiwZf/ZN1JAOYPgDal73wDPBYm5HUWteh5JF6nU6nWRYnJAxlSJxt9qZp0q5ba6hgs+3PUgWI9Kh0r7+wuQEUdyji/Jq74ubIuxyrRkVE3UTxWssHSKWRlPu6z/dXIAL0CqOfrUj4Q4M/3dcNJgZswIP0r0QNjKwYYgqJ8bm9I+Rq07detVBHC658xyaz3zKcDy4EfA0roO1t7F1xIVeTJgWmrpt45yCngSL0Ov4pdNAZvcWTJmCMBa9Y+pU2JpWQuvJpJu0ftnzo4UIW5ZPPu7Q6yqaiy7AbA2m3lQyduwgLGQMAnjz+9UbfjLtOs5BCFiOsRcxQJq9p51wZQA+otUkLYWhVXSilRmwUluvW1MdSSzmQGgAqetoo2ChPcUYrxe5uea5FTYqlQPzKeEiLkDxrahGBJDsjKRZPxiwAM+NC+DKxQyAe4nmVPX71S+p/bbUZs1wbSB/lSCBie0jK+JiDVspMOwtrVW7cb5D/AK6VWH1HTrQ/khY+71KtxUwVdaw7d978ju6VrbdhK64BQAyYuSJj6UNCJ2EMI2HPESNnH4n/ADp2l1ZCNbMVKybQRHH0pG5VdSDBHMtwJF6L4+aggnEtZR0VRTyTDBSQDxeD4HrNcG0Y4YwsXN/pFb7ax3sbysgcSfyFIO8ksNQkSVVTzbrVIQE2mdisywFU3BiSfGs9vXsJ2RZbgMeMRf8Ayot+1vc17AZsV2hvxJt+IoF2tjkIMmB49vQ1K5/JHQAQNkhZ7sfCn6NY2E2IH9R8YqVdzvs2jaRrCkBBzlleq/jbGLMUMQMjJ5sOlKZCdnx4WCYQz/8A7TS9apOOws2sCEA6dAKf89lVChJDsbAeBtzUyfjCjuHEnkVEztoI7dcqirJb9xuBas1AKx2h/cVvxUiOOZo761vsIIYW8LXiuyGJJkg2Pp40bLQIDNuRmg6yDI8I603XshmOA7+wMZsswSfpUzMA/ViALKIAB8asRiVgmHN2HPHgK0gZFsYZPp0Elg0l+BHiop+IQa8AAyRiAfG7TWOuonI3PnYm9cBksjheOhP1ogp8CvkkrvR1trU44jwP7vvRvKGV7z+7+n1jxoWyIVgMmmP0rUJTWMwb8heZNCFmgQII+gPjWtmLxGXoaWoIYiRzExPFEWXp3ZXy4pA5bQxNusda4lgHxAMcA/4VgIVgoBMCiZ1iQJa0+YokdAMFUd3WaFJkkdLj6ULG1xIH/U1upiyWs3X0qkBq3BboRFC4g9v1piwFgAkTXbBwJub2qYo7UZIJi9haie4fLpAAHMcXpdlgAybRTAwYGbtOLdLdKyaBiCyIAQZYkmDI8KmHy4XWnxtRUP3bBM91qzZvdNhDrCm6+cUz4+oFrIxd+vSI4+8Vh5N6KdhKq5UzmBiP6T1ryd6f7dtpI/uYYhfE9P416m1CUQA/kpyA8ulRbs9iA7AMxHtt19vi/pV0Z5Fai4VGUf3YBJaDH+mqvhs2v5GKy+Sk7J4bxApa/H1gnUfCIXkSZqv4ulQ3uKIfSxAUm0Ras8pyLaPRUFUVF7A6THUXsPoaj+T8vWN+vQ7FWfjYpsrq3EDxqrcCdb7VE7Fki9pgV4CbZzIHeSJHJDTzXTt+v6meVM/B6bb2IDmWCuy5tfJTekfE+UrfMBVO5SZA6gk930od6j/ZkfHLH2xm+Vr/AIyKL4Xxv9urbfx2Mpg8wCL1n+XsowNLl+Sna4CjWIYgzkBF5vVC92r3E2AhsbMb2malDkaMShDCWyN+TYUQ2PAGIgcKR3E11TMZO+Ru9sltjQjlcUIk5fj7k+E1OPkgsybmyIJVCBjBEYz5MaZv1e6p/uYErMbDIJJjBY870HxtSfIZyyGVVU2KTOTd1/QVbI3YV1sAS75kjYg/JT1UR4GlOqo7qu4kqwCvsHAYSVC+IqldRdF1azjiZY/uk/umo9uthuVmeIgSwu0fkR4mpkjFz9sbdQMZXCtzI/b4+FaxTWru7KWyChADMi+UdQZisf5JyYax3SDrH7VY8Aeg6+NcztpxKbCHjuZ1mBkbD1qIbKtrcMMSoLDaLkj9q6/SkY5KybDGwHIyPyynPI/+PFbpfVr1JsyOAAJ1x3ZmzRJ4GU123XizLqUkKpUK/MnuGR8amSNfWx17DrnUy22EGbjuA9DFSkHcTie4gM5iASPD0IqtlbU67dt4gbAOCLkTHhQNrWWfVDSDjAtcGfvWWhND56cIVWGRk/0gc/eqPia1XXIVYJIXa3HN7fWkt8PZr0B9BMvzN5AAJEUzRt2bHGagOSEWLLFibVpAz1VyYBkMi0ZWgE2pfymI2/HbWpJlQRMA90fyo0GLD4/BLCSbqD5fSp/kBk3Ou4/hbUQeCGuR42NXTcEslhTSrP7TDBGLlRyWabfrS9gV9yYyCwyAnqKDQu1ETZt1AKJZTM36SfSlprY+zuCzsXuP/iZ5ofwP5H6iS8ooJWCrm0zBis2BSw2aziyklgLgyfxpCO+9riNYkjoOLU3boHx3wRrkBpW4OQDVlJwLgID3e4viDIKA8yb1T7WsH3FP90/tN8ZIuPWpFCoyBu6SZPBmKzaz7Pjuob+52hW6yTA+1b0ZH7Ng3cFShYjI9XB5pPYUHuRl4dADcClontjJB+EsJ485HnRzKkhAPcbNfQCBUtEzGYIF1qCEflh1865QFLsxgmAB4TQsEZg0EhSIUG1G6oDsLTicTHPNTJAEKqnIWFijXv4zQ6x3QGGIHPM+FOYKdKMw7GABHmxif5VHvZ811agDicWItbpVKRQyslGhlk42UkRek7NiM0hDycsfGuXXZdlzEDm1uaDuBJ4Ak28TVRGABmcAKDPresE/3GQYmREdJ5rEVc3tAYrB/SuKr3qZENiY9DUWjDGYXZ1uhJ8L3pqNg4aJmSB50jMjaqMAR+8jm3Sne221CUBkDujp/wBClAds3Zku7STPtiLk+FLRmVShs68jxH/RomGwwuJBFwT/ANdaxFZNaq92/c3XzqI1kIhjYMDeZjwNCsyvtEkEEOT/AAFC5nFoIdYBQmZHjWJkASzSFJIUC4vWZs1oae0kEyCLx4+FarMRLkyRKRaPKgL69hD65xERPWtRpJ8ZkCtGTmIL5mQY7h6daPIBZY3ib8egooQyrWD2ZutKYpAEWEC/jURxIaehPB8K4AEQevJ9KESWI/6iuZscT+3xqIMJrGLDsGuwA6+ZpbGxb9f8q0G5y/7UMhmyTmfpURuXfEySLVpYL9BFJF3kdBx604JIjp1oEUxKsFS5Hjx51nxoC7GM+AFHiIF7zx5ViiCYEA81QA5Q4Ez5/SiwJE8CbVirBxj9aJSxMZQBP3FQo4oJsLxE/wAKU2z2jJvkPrNNM4hxzN/WkbUYssjrass0hDbVZkRlMc35Ar1NHuasGLD24JvzJMSfpUn+3VlMDuMjKb8c1Zr1r7ae5JI4nyrEWbdIk3A6hHuHDZs7DHjfGo92xNcNqBVWY3NzBF/pNeo8bjAEmclJ4kda8r5mg7iBrYKpEKRf1q7VGeCjTYAoO4gEg8gnrVPxFZ2OsgB27nI5H/QpevXrhJaCggufMdfQ1RqTvOyZcrBv0HX0q5WAY50Yp7Q2QrC5HIMWNSL8LR7x1EdrdxYdTzzRudmg5bVlXZFQGxx6/rTHAaNYaDILt5eXlXRozJuvQF9zU7KQWnIG3FlFVbccAqQCsqBF/Op11bTkupImSpAkAjkzRFTuUEPOzKJFK50DYrWdmsFdkJBGNpyvyaWvxWV33PtsWDeJ7rU7adap2liyZC/M9RQMA5A2qTgASFMEg8SfrVAyA6NL61Ue2xDkHn0Wu2qdSqpLa1KkFx0BuAfrS9+xi2pdihgrfkvMeNNL7XDRBSZWbgiwg1LZQCxOnSXXHMIJAMkkX/hST8fXuVtmUq4sjftN5ZaFtW3S4ZCTqYlXTkweoo9AOwEjELkAVm8A9KpuBjYpMk0tpQT8ZiBsdx+KgWg8/kKGXXX39+qCFbxIllrNnvLki/jsh1P14iicKusgMctklpH4NBEAVAKbMka01BRsxLhjcwSSQftTk1r/AHG1kuhYD2ie4MD4+lTvshTJnbAVbXkd0z0rQ3tFrshEtkDY+vlQJTs1hNYKHL2z9Tlz9qLXrBLKXg5BD6kG4qjWVVgyQikK0G4ve1cNTHcdyLIU9pH9TDr9aYQDn1L0aCokAcdFMetJCDSRihyDCLcC/dW6dXygBmVRBAIymAs3PrRZNkUeH2H8WmJm5E+VIA+5sVte12waGCgjrJIJoN51bF1bFDFDs7m6g8lfrRfK+NKadw3FlkuydRacaDUu5tenWinDll5gif8AGsdTg0kslXw53Tg2LDNiOVGU4i/pTQwCs2o3C4OPuTSPdXVB1KxhioWIyCyQ3pNCzDUGbURgI9xz4H8oqThE1YUEHWgbtYD6etN1sSnuZBge1fSKBnW6rERJf9AR61ml2RBrOuQqYyDH1pkmjSVdr25E/wA/tSwrjbknYutjJNyVAF4po7XXNbcQDMeM1r7p2e1rMuxKgxwIp6BAJkxOvaIBPf5qbimsEYM6kHCVgeBMAUnY+KgCxBKktyL2mtTBi8ECL24MihMWgCSIhbgceFYFIXZ7YaWbIsD1MUxs1Rm8CMj/AKTalZKYYWK2IJgEzSwHiFQe6M8QCDP9J5qPSfczKrBa1/uKb/cxJPcsHuPhPFAWVAOgME/SqCkr07EVXQ6yEhJk3yFzHlU29R7rYgjW5JUeRvRDcWAXkx3HzodkEGSfAH04qgpJTngOSyTjP3psO4YqOoMdT4zRTNouTI9AK3WQHGySsCGB9aIEE6/bCkiLm/2r0ygBEkhSIYKPyNmqbeVeF4Bvf9DTvfMJqzChe7bPP0rSBk+7ZrVcQCSGN+tuKmDvdus9oPEnmu2Ao7AHqQCet+RWBQxgni9vEVAZscKoUCBeSBcz0rkPZkV7mFwPLxodrFdihgABJBPWulP2v3cX6+VAgu7YKyjtBCt5U0ACY56VpCYyFg2JHQigDERBgGwJ8TSBoZXAk34I864sCcSLXNLVXR2YdwYQTWZvGR5yj7UEPC9s8+BHhQbAShA9fSjRwZjjwHnQuL8SOtJCEyCAG5FmPjWKxXYQ1pH60zaywSJtAgdKQ4l1zMjkEc2oZDdYOHuNzxHrTwGA/wDK4/hSvcRVVBxEL9a3Mg2vj/CoUFjkcfG4PpXa1XOWPmB5CsMFubRat1gFgD53okYDMTbmLfyo0H9diePWsVRhkOJE/SiKh7mwmxqZBLrOJHU3j0pewKADl07vLrTGON5IP6WqffDAF7huYq6wKydrZ9jqyCdeMyfO1Va9j4FBfHuOXAAHSol24LgPyNwPKatR4xKntP5H6cVlCxPvjXt1lrqR2+kUrcodkmVVWJZR4EUz5WnJ9e9Dj7X4r4qbN9q5NUAZGSAfr51NaCdi3LqDiAqwWPWY8ad8ZxMt+JlTaItzSf7Z1trQwy5BiR0ENTNejYmLlpi6HyYVc5BlNmZQYDC5J8uIphUMb8jknkDyoHbLWuCjyfqaWGuCQxJvkORHFdDI5XyQAE60WVVU6+tJzYkWMAd3rM0fEMSC5JGPkFAmgXWqLkjZP+Zk9omapI7bs2FgsgRYfxM1jhe1hKFoyIPhal/N9lipQHEC5J8gT/Gh1sylmZZ1rHtnxg8UTcGtJg7PjtsKbJChWOST4i1UalYo2uQVA7F8+tDlLElQNajJGNEjk/8ArWFWHno0gyalANsN0GxCcsTGII4VgZg1JrCbixSA6kBwR1o1+TmoDIYF4HjaTQttVCCqd7uJBsITr9qKmRvAj5B2timyHIkkrYDrFcW0MPeYDWwC5KTzFz+tdu2SpyHeCZA63yBrE9kMA6ZbNigBZ4Njl9KkWjtmY060Cd7H8xwRZj+lTsdZxkEXDmepi6/pTkbYSGdiQxIIH7pIgfajfQ3+1G541rsc61/qRFtP3o6JJj0yOnwyAmeZ/wC1T7NrKw9snMwIm0A/lTEaNZDAuQqxsHJg8UsNLEDZiQQrmLx0H61qYKCrTu2F8cQVUw0dcf3H60J2NmzAFkZYWOpPX705NISO8lRiqr6iT+tcoZDMEBSDrcCQD0pMmICqrEOCBLj8u5ovVBXYytrRxrL2U9QOKLUyBjjztlSBYf8AU124mS4EPyP0FZa86FAv7ia2lpxKrqUDmLGtb2ypLCWa2J4jxolJ2IWPMwp8ZuTSQ2BBPfjcT4zxUhDbWmknWdYZsQABwCOnpSvjsAX1bDk9xIPNqY4bdgNoILRxwJHWg2aURclYAyM39OAKYCRiFQ51gnMDuHrRLgVbXrE7xOTdIPjSApTaGWSxUNB8JMn9KYm7DWTADNcgcn1qIz5KR8bfrGWxgwLBjc8Vmor+aqFEgR4qJ/nWllXWxVZBBAccXHWlq9wXAMG0dRaiLGZQ/ek6mYAkOLeoi1SjAtjsWSDY9RFU7W2e0usgg67LHBE0gooM8ETLHgmkJOOLMpQkMGjHpzFBsyMBjLaxiSOCCbUGksNmwIZPRvAihYvCgDkw38akRzFrlQAD1HM09tisiHqBDf40lJX8u4RI+homBnIdqxF+aiDXgM7fkLEfakiCmQNh+XjEWomIfW2tgQV48Y8qn1Liha8tZlI8LVEyldg/JjwIrBLk5z3XEefAoNYDsyR+Nz9qoTXKl5xgSAKUDEkQReARkCazDYDkhyM8eXWnbAFSTY/tXwE3pallyYtccJ5eNJCvk7F9suwnHg0KDhmGK2JA5Jo3K36AgQKwTYqJHDN6cURckGNgvY5C8VgUlcpgTz4ReulhPiOaBDIHh/I1MkNkY4tYluR1pBJyYnpwP0oyQVB4N7+lYjyQSIBFRGlwgUeNaTPWggu5jgVok3bpURxbugix5/lWODgWUSwsPrR8d3Tm9KbuWfST61MjsRKniZgVusKBzYXNK9wIe3iOD50YIKkrxxehkh0hj2xAFYgdiwjjk1yqAqRc9aYrd0DiZJH86Pg0UalUqQTyQINaTxrIhR/3oFYEEkT/AEmhcvncyRafKpCH7gYZEWHApO50YEEweAKKQTHAF6DaqnuUT1PjUyQjZijJtnuiPpV2kZaQkA5iQD4VFuXNAwgGIjzJqz4ww0hXa63nyF6ysi8BOxyB4KiFPj0pYJZSEAVoxPr1o2YsSVAMiQBwKXq1zsKIMiwJg2jxrRkn37nTfuSIvIj+kgDGmanJ1hzIdwpg+AoG14bTvdcg4XH14rRkS2xra9YnLwjpWUoYsbqdoKsh7Tbwiaobblswyu116CKSNxYI8AqVPb4HpRvuTEMRnsJBYjn/ALVrRnY1tjKCcVnEkeg60pSUBdYY7BOJ4WJrBsyKs+sE3Kr0g2NLcorhG/8AWSTI6C8UkPI1MqhnB1rx4yRQprbQwxcYcIDzBsaTrXuy2HELGC+PhNP2yylxBBgqpF4AqV2TJt5PyduAJAJIUDxFO0jELquRF+keM1uz4xUnapwZTYdTHNAwJDMJXtl5PJ5H61RbKfApCFZGKSt1km8RBovbU6rGXk/kbXFv4UCOmsHXth1jkdDlkwo20IUUoCyG+M+N70JCyZSys3uLOEqTP9Q5on1Lq1q+x8ywHH5ESBTVUEkhgVjuPjekEqIYCBsY5E+PT7GqIQbAZ1YwysjuctjcARFxTnZ9yYuCdbAyw4Ci5ms2K2U7SGc4qvImRcRXa31SNGwN7VtZYcDtmPuKz0ls1y3aRR8RC2lsSGAsfExzH6UzXqfYksoVnAGPhF5pOidO86icVbuUdIPH6VajfH1CWa7i+ZusCJrSaakGmnAxeU9wDNrqV4uf3UtQ5c7UIxaYXzFopusqgDIcx0Yff7WqfSp9hNjiHMmDxzzSATHZ7mtwtgMgfP8AFp9a0B01+7s73UMYXkDoKR/ebYmw7CmsPDdTjEU75D+zuD/HclBBDHxx7lj61npxg1wpFncuxU+Sj2KwwHAnr+tGxBdXW8QCg8fGpdaaQuIsNggDoJM/xqvQyk4Hn8MiOvQ1ctsukkzi6yXuCe156T+MUDnXoALREAqTxJNEdn5ZRE2PlUm5W3uFH/qRoK9TaaWwSK12CV6nZKI1L+RtdPaXXA9wkNsbjitK5lSrS2qCRxHhWbUV1HvntABAHiKnMAsmatjuMTa5XYB9SGFE2CsAvXIAjrXYBUNoyAAI5ANope101BjcHWDxxJ8KpoYsIucj3Qgm586xjacvwJIB8KxYZVLwQwkn0Ex+lDuKvkSpgRx4EVLAbFIWVoA7WAZvrVJxZQ2Um/b4ECJpAhSVFkIAgU5taFE7SrNIBH0qWCZ19adw7osOmJpRdmcnmxMnrFZs2knEtksYz5i1YASA0njgVojtxLwgMBu0EefhRFG1L2gspIyY80raQAGawDAhfC8Wpp2MUK4kdSR4UbIBBO1xJJbgn+FV6jipZX7jIgipAYYseolDVGtxCryQSYmOaUBvyTrCETLRxSNbqcYHcQJnpR/JuVEXWVYj9KUHcHA4iYM1EO3IyqWESbLPlS2ADA2ibgdfSj+RsEDEZgRH8xU5BGM2ANj4CaiGl5PibhgelK4MEkBvHyrRrLSwJJckZefWK4qXKlzYCF8YtNRDFBbgCB+PnQGcsLQQINM1ukBm8lAHj40LquVrdGX+FRGgDWpm46ihyUHLm9xRZAyp6c0llkzxUQTEYxPnSyxEibi49KwushReOaESbkRzI8qBMALFTyJmPEUax7d+TNvKhClPyNrx9elHrUgBp7OKgGazCsYkC60yQzLaF4I8T41moLDxxINaBjLkEmRA9aoFUO1qpJbZIiQADa/BoHeLm88RXCC0sCDEtaxiaAAjk2Av6G9CEJgcgR0ifrXAjOSLeXXzrVyJxJmeD6UDyqlCSsdzEdQf21MQWTXsDCe4/j0HiKP45A1HQ7ybA1unWS6sx/EdPSmatG1RmSGJyiR0NZ2UgbC0gKQuUQQDbpRKylJcsygFG6EG8Gl4HXrbNiXBhR/+QrDfFQYMk5HrSgAfd7Dufy9tZCsbkj+mg1u21XVOwuQXB6g3NEdcuV2ANwcz+309a3XBB1n8hcH0o2NQOuNOsEySC5YcQLBa0thJWJIxg8V2poVQiwJsOZ5NGxb2yGUXYXi5JrZlnFtiFMYYSAfHzFT7FL5BfyYyqeXhVEEDF5ODY2N7fiPWaWV9tfdec9kDI9DF4qZLISga7OZdSL+U/wCdE0jYY2ZKoIAHNM0fB3EO+se4FUS54kjxqfdirCDwvdj+lEwhiWaXfcWKQrKO49BApW0tkyq2Rcd3iJHFEM10wbkgz5yJBqcDYjhk5YKM4tLiRQ3CKLOOvJWCWCQQfG1yafq2a8s+5UiSvM+tJbWGYoWlvxJHE3NMV/ZOtyBYAEjqOINScQMSMCpB1/grNPmBzFJbT72131tBWAmvpkt5rV2v3M1h09TSG2vpdSi5MSO/xvx+lHTqh4V2VbtfyA+5N+P+41RJ6Ei/8DQ6NAVH943Lq5I4VVESPM0pd23frY7khg2WzZ/VJMfbih+TkkjQDGwEv4Soyiaw0/WXo3KXSXkp3bdZ37MT2wrDwABxA/WhZkdjqdD7rwXJuAQcenjNJ1e57QyxbYQAfMETWr7LZfJcuqLCbUm8ZAkg/SlOoM9ZZTqyRBpd8XZSpP8ATLEx9AafHtKNRcugsrnqKQQPlakV2nWxGxNo5GJnE07XtO3uVVJWyq1gIrXLiWZdwgzOsy8BiQBJpZUOvvWBacuYk9KxY2bRA9xHA2O5/bE9oo8ewMk+23coN7mmfYv+ti9Sqmsz5m448BTE3KyIdbhT3EqekRAqfY+BUJLM0qF8z/nXBXVyCIGxQwWL5db0TGBdjGYkqrAhQCzH9IoWd0Vl1AErJDNzSdm0/wC4AU4s2Mg9MfyoviPtdm3brAMV1rFwPA0SAcs27drRrlVK+Ezet3MoX2jy/wCBmwg1ugQ7ORLE28DN6B9THTh2lZlfET/nToths/tRBJOSqP8A5c0rcUUppayMWkePW9YqFdmtXM8Na9wYo9y4gKf2bJafyIjirJGgKiT0WY9Tx9po3KBe2SJCkdfWgBzAkDC4PiKKMW9st3sMyD4cc8VrACTGbIv4kECD14rQxXWqIcWHNCdQGTcCZZr88mjKoJMd83H6/wAKUDBLrIZoxPAPj405tgfTKnEqYYDwEVKwCsuV0ALR4yaMdSRGR48fKqSgzZBDZWUwQB60wDIM4J8I9aS4BUQ1vxg8xM03XtATISZBiePKogC1rdwBAt5UQd1svUgkEcTe1BrMCJsTLAePFN3qqsuMif50gLLlmY5WB7j0NC2LAzIU/wCNcYCkRiDJIFE2xWVTAAscT1iohmzYMVH9Ikxa5ECsQQEJOU3/AFoYzXIHIASB4xegVpBg4q3IHSohyuoZQy/iOvnXPwcvCw+lAuBAtJPDHwrX71g3ZZgVEgSQBkLkW9DWzAJMSb38aWEECxGdzNM1kEFStltc+dGxYJtZuYmgJZhH2puxcu4G8QfrSWJQgeApYCAsliWutsR1pgYYgxHT6Glp+eybEMP1o2Em15tFZQmMYYzxws+NUocoRrD+joaQi5QWOdssvOqNd2jqK0CG6yQkRaI+1OXcoZX6wQB5xSiUQhTOXShkIMQJvY+dZ2aga24yFEkXW/SefvQh1CyR22Hp0pbFiG2N+K8es80IUksxYsrYsF9JpkjrgsQ0ANA/hR7tmsg5gi0W8eaX7UEl1ILDIj+Fbk5A1mD+4yP0rLFDtfbirHutfpHF6sZhuT29oBIJHbbpArzSjuyaphWBLN/KqxOvWYbtUWHUnwqU2VHHbr16vbbWCzSrmZgAQIPrUxIQFlSSLqp6dJomDKpFsjdU6X4ilbG9t4VblJLTIGQpSMnBg0MVhoIgTYim6dW6RIBxWVJ8LtP6Uibhmn25kIOTNv8AOm6WUke6zKqmCeYHFUEEzloaZD3BFoI/bWqux2lQV7uy/UVjKG2D2yVC9wI6jpPnamZMAAsgEBgeSST/AI0wADsuJXKDctt8W5vQe4WMC7z+XQ9LUWxoOewYIPxgSSxt3CkbDjoRdb57B3RjBkGMRR1MUa4ibPov+G+Uuz4z69rgNqb3MZAU6zzM9RXg7dqt8nbYDNi45gT+K/as168pfaO4G4mxJ/EW8qIatj/2FUl2XvvAuOh9KzbXyapdfBqNs2FTt2lgt0EWljZZpMbmVRoJA2bCRP8ApEk03aRrxTUgVVEIRJmP3GaVm27edaghQZ1xYwfyNXVqNly4c6M1liFIB7zeRBMdaJnUMmvZrx1gtLf1kXj0oyZ2f2mBVY1ZNbr4Ultb+8PeORMhYNoPhR0x5WxsrImPbjJfLpRK5TVkgsSDJv3SPsINKJID2GxRbiBHjRpsIzV4CLftvIiRNPK35Drx4COxZcsYSSFA6sbUjeWwOsvjYlU8SRemh8QdvaA04wO4huDUyps3hwwjYxy1u3GIsSKOt/IrXwM0jYEQNYgghjxBH41vzETbpfULkd2ItJmqdbnb8cOvEFQCL8xNchG/46+33u4YN0IKmKKiAc5CXWNXxhryKcqOCBN+a3U7p7mt1XMKAjnhrXBqbe7LqHw3UkHEkA9FI486dv2qja0VAI2GCZ5A61N/sSFA7UKDY0Kx7UW30NOCtcoTgVAVT0IPA9aVt269rnQScniB1Bjx9K0bcAnabH23B5AA5qTJ2Ehn5J2W1+yCR1uRc1firqxBC7UUnLoVsLVMqjede5gNYIzUDqAIpW3JAASe6WXwxU3H1rSxPyTFqjNtHySo6gzzaq+1suinGw5x8KEHYqZe0AJxM+A4NcXKhgIzUTI5PWpJAL1ttVzqIAEhzHXK38q35IOGKwjSMT4we6sLe2yEmIsxiQT+X8DU77djbijCSTkhPAW9Toh+pHACuIZASTzai3uTrmIxUjL6Xn71iugYMjGGBBHQnkz/ACrtxfaomLxkPDpH2pQMHIAEtEWBjkz1qjt2KFLAKJEnnCP8ah1vrYkxcdpHr1rT8o60hiAp/dzfiKcwUGb9qoNmt5BYTqb0HWsXYSFOtpykHxBAAJoPc93cMlDkAZL0Bbut9qxGLLs3oMCpOBH60Tkij2wwA1/jHc0/WsAZwzG/lRof7SgQwj8uJNbrYdyue0nu+ovFaWvkmJIOMFR0AnmKXht0kKbi1vpejcotzdRJJ8+RRs+WtWdu4xEXNxxVATQAUK0kc3geJpja2RAWkZXJY9KXrENi0j/y8J5/Sj3EEYZFgpKlvKelEjACvJEDocgfWKwqO4xzb0FO3jWphBJgGZ8aHBPbLO9mWbX45nzrQCUI9sYHGZWKYZCKAgnqKSI2EzAAnBh5+NO0IXIlu4dPOLUJgYogyfxnjrFFtXNsOJuD6VgJ9xQn1/lW7Dg4m5FvITSRrKVwiMJi3PFDrCklYNrg+Va5dkhvxHONjWAlDHU3X08DQQbgFVbLuIuv1qbZ/cc4WPXwinbGnGOKmLM5Zh+HWKSOH5KeizHmT41qPlyLH9D40CsufcSQf+hRAQ5xMW7aEQWkgkk+NhT1JzmIIN6miAGP1imfHYsQ0yT+09KSRQku5LfkCSCeIj/GjW0Fx+6GUdARS/byMZESelY7OrNipYyCw/pXiTQKHscoRfxHaq9Y8TSlV/ysxmEHAma0FWGRaCDAAMn7ijbFR/cEkSAs2A/qoEz3MYZwSTd79ARiBQ68mZtzAtmxsvrQbQriXEY8HoZpmuF1IFIAEk2sfSoggJKlTMsV9vwFoP1qhktkSO6QINwZqUv2KsBO4uI5abc0zSHLDK1u0C5il+ES+TNgA1qzjrBjpHUfSkBdY0FmbLJsQo5xHGX0p+1kghwCEMrPQeJqVHMlkxOsyxSIK5C5+1Z0TRutxuYI6gKvJm/iCP4UzUwPx1UyGyZmQ/6QMaWNoYupXEAAwBJFdbactuzAQLnofIedPgBpCM+LOEL2yI6kGu+M7bQwdiBGa4ckrxfyiuWdsuTMHuHEfTpXZIig6pyntC2g+flSAS72d9h2JJaD3CMv8KMO7My/HcnXPcjAEgHgg+V5ilO0Mzs8lhDkibjk0JC6iHgL+4BTwtuKiCOt8idJOkiCxYWgdtYqa5ZC4IIOSxefEUQfMF9hJKTIB+oJ8a4FipGlsiZZf6vME1MRGtl7wRipMgMZIExFarM2HtkKf2AcwLfrRLqRvz/N1IPkR3cetqDRqVH9sAhwSYI8Ba/hWUb+Dnx2sHIIbLum3FuKwgFoBkrMt4AjpRFtjZrtiNgyUi/lzR4o6FQcSt4sJ8aGlLBNwK7W5Yr5Dw9K1GbXIHcrDHMWmu1AK5UX7QVM/wA6IwrAzISCR0B8TU6TJW0YmvMYsILALr8o/wAaZsb3UHx9SltrBggmyQbz4SKxy8o1g7HITbg8wKauhHZmRZZucTjM35PpWUphGm0mLV33/ED6mOvasgKPHilJsK6de3Uv914DIbAsJmfK1PQe0q70EIwOS+tN3rpGhNkYlQFZuSchEj70+pmRTalcamMB0YNraeppQc/JfZ7rf2roALudgPcV+lOXWmnLVsBIIGPRQKDYwGIUrrAYALqsb/uNTSJMFfieyuxWf+639xwbmw4P06UWz5Lam17FIKhWZ2a/bwPtVDavbxQGC3J5PkKm2/FXbtbU4AyQgPPbBghY9aGvAplb7EOj30UQNcokcFokjypTFHTUtw8ZoSe0gzKms1yrrqSDgmJX+rpHoKPdr/3Hx22JOK4htYsVI6jxFK8AApdmXKSyrGE8knrQFW9xmjAYlRe/WaPU5dtesSCrBoI5YC0fSs+RtCn3LS13XwLE9tL8kCW1FvbZi6LCm1o4n9Ki3/Jddo+ORnwQwkEAmqgh9psWEE8cDoMifrXHWy7F2hlyx9tjYyBYQPWh2QZZcmVbIP2iaxioZW15HK5ZxwR1o8XcGGgiDYEAkiINLbuAIfEFSCPFvCtBkUGU7zrxnaGIEGAQDzSyyBdYxxuxYEWkCxpjYWMQ0gSLEj/oVMhbbs7mhQYUMbUTFCNTaxDbQf7aGIPMrbn607VAVTrPbE4/+QqJl2tuZEYDSpBaOoNVYQhGppBGQHgDUrkB2pXww2D8WIAHkaxzG0ItyBfwuK5txcI+vn9315peuQdh/qIOR6eVbxBGkiFEBlBGQ5Jg3rgqc8j9p6gTIpi5IRNok/Q1iAC5iSZPT7VAA5DAlr2/HrB60TTHcDJ4rsSdvEhugPSgZp7VbEi0G8VbLRsizCIjrWaSbqRyDYHmawSJJHNoPE0egsHBK9pBuelIG46oAIv0H86wyHBHdcNaxtW7VAPN+AfUUH42WIEHmOKiMJZTmpgmCI8KIlmMOMiIIHFAXI7jbni9jRIA0oXMgZCogzjjI5mIPSOQaEurKGUHEH/I0OZNptEGhBwBk2A9KCMMXgm34jyoSSptMWgDihzyYcR5Vu4iARBQ3ABvSRgW5AEQTzRMYUE881ikYEXym/lQtcd3Ik0EPtPnF/Cj1p3r4nrSZEEHpYU3QDKgSSLz0qIqgEkk9xtA8qBySrZuWJMdp6DoazNSQTy3UdBQO6v2a17SZPnSQ3Tr1rrMg5BTgI6ze9c6lxkAZ/JvJYtQJrfUe1oEkgEzBoyWdVXMhjINolaBEKFOtV2TyWM/pRa9oDlX7RAKoRwPGtVSQpfkEx/8fGmBWZV2Bg+K5bGIuD/RWcWaiTBJxzFui8xHSm6l2JsIJxyH6eVdrEvmZUT+PhlxTWKLqy5aCFJ/UVKIIj2asQ0OSrG5pZDsSrAFiAJiAVBj+FMyx1iAZg2NB7ZKt7hMmBMxApiMB+QJLbpEk8PFvvXO7ZYiGKdwjgRwJoNgCiVJJF3i160MWULYm7MFHSoGMT/cX2mysSMJuSeprjmA77SSSIIHMVyMQ4LScgRJ5uPDypqglgLqwAAk8geNIALiZKLlC2M3hvKiwZk1qqAsGLZHlv8ASaSqYOZmH5aYB8Ip6ZMB3YEcXvQno1GwllNYUMAfTn9t6AZBslJLTd4gcybedHmWLBeAMebyLUsAl1YE9q4kHimMAZqZ3VXQgbe6CeDYk3rNSuxR2cqGIR2/0tc0oMmwtrWSoIDMLC/MU/Zhs0sp/GYC9bC0Vl1g1zchqyByq/jcqT4CgZiQXYAIbT4yKDSGKKCYmebXnp9KxmKAJrkgGe/i1EfykZ/jBgIBZB+GwQp6gDinKCGVAFKfuyvkTaaHSh2NlAKkZAHpNEqrlJaAOnh6VTLL1hSEwicZsCDPSOgrUB7WcgIBzwZitxDuCRaYM+nJodWwNsbUxlBCkR49atomVMRryUjIGSYuCBU+iNB9tmnWxHssRIg9PpRMQurFJucVB5IFY6goocfl2pBjEjrW0YYw6VEmPc8QTEUkEKja2AmSCy84m/6U3WwGWlk/uLIYm+QNLYpIVYWLSOp4rPQpgHV7jLtQtCqNikm9qdr3lFLuReVDAcAGOPE13xmHxm9vce795/09ABXHA7dj2KloVQLHxvWRCOpCvvABdmMMAZleL/xrNT+0VVF4sSbmJ/H60wsoBSADB/8Al61OFBAIaChhvE9a3yjLYz5Ca/eyAKJlBJtDcx9KRsxOThQWDXngxwapZmdDrJ91hBE9ev3qT/8AY4juY3nwtajpGkw1CMxwAxBxCk8gi4+9KOptfyAQViDkefS1MXUurd7qgHKMkm0jkCi2qQsAgGwMX5PjSuZQN2croNLBWLM0tYwqn+lvOtQhRAAVQVDDnu/qpcISQokGQY9KFmAJxPabDxYUgK3hjp2bACGXLEc8WqRxjrGSiSuUnpFXbXCtJMDZEnpxzUQ1Zl2ZpgGPQVhpyaM+KCpZtlyQDPjeOKsAwQSLKT/kP1qb44Osao73IYSfM2mqmZmlTAv+IPJ8aeUALFhOHjbyHMVjB1aYyHIMU2BiGB7us1gkxmP1rSAWAwJHMc+H3rZfkm4sD5VrMpIDc8+EmtJf+kEAEkj+FIBpmuxTiD0F4m1LxZiG87xciea4FyQWsR+I9aMBRaYjmOTPSgQndUHf3LbCB1pLEWNyDYDpTdz9ylRJUXXpPFCSioAq3PI5iaQMzGBue2POhyyYKYg3P+FM1d4ZGtBj1tQkjBQBBAEiJgUCdtbJlhQCBfzHhQEYlekyR6VilYuYvA6ya4jPYQ0AmYPAikDQRrM45AixNrmhYMDB8DYcTWA5dbDoK1Q3LQDJAHl40NigUUSRYA0uFZ8WBUAcgc+VPxxQgX6yKySSbif6apA4qwEjrFh4VxSAQbnk/wCFEGKzFj/nXMRJH2qZAKO/u/A9PCnaWZWEDt8aVMss9zeNOUiwBieakQOwC4UkMbDwimsP7YFshBMWACgUShBM3j+dK2/iwBg8D6RSQ6RsbBeIBfxgmg3HPW2ssVKrCEXNjMULbhrxOUMbeorG3YllAJFzf6UCmEfkK2pC3aXAlRzQat73IBE3YT1HFvSkMrnuiRF/KmfEfLNZAMYk+VZya+ShXDaFCMWbFSf/ACJsaMOxdUPeGEh/NQJEetTKcWlPwsPtxT1Gz21KfiZB8QDzR/wK/wBjdzqSw5IWD61KxJWecgAAfKnb9fbnl14qZr2Fhf6TWlZl1RpcOQIuJvxMVqhwB7cy1zPSKWSJhLR09K07AASimSbnwAphAMBIOTEFjx5Xpv4uDsZVDCM+TIFJVkDEP3BrLb60Sg3ghZvkaoIxVQZe4uUyEA/ZHEV2LhGPKmwPlY0QLSWHIIBPrBonQgLu/ZBWfpVRWZPEWIaVI6iu2QXLs2AViTH7rRFCzrj3Nibk+swK4PlthG/IFT6Dwqbgvg4LrDq3RrmLRe/6UJZ1coREgYE9CfH6Ue/XgvMFjz4Clle5SAC8gFQbGs+0mvWGasKVY9wjHLopJt9aEgttA2vmxJB6LB4+1HrdkjVAGs9wB6k/4UJ0+0wAYi/aeZmp2qDnNh6Sg1lr5KAKNbhmiB0NZqRSrAMS7Dnof+jXPtPBQAgfTt5NS5iDT6yh8lVX2j3zMNwazLWrkFQSRZx5GYqTS+xnkdZPlBqhQbuMEEY3N4PWtQGRe7YruAjloIMDwnpVWexl9pkBVe69jfrNSv7ZUPIZkIM+ImTRFy5LtdWkhfDwqCA9o2bNgfIIwHS0+AoSq+1LC9iY5km5oplUD2BOQtB8q5tjKuZAYntP/iaw2agEaht+TkwycAFr2p6fF1gksSiSSFnof8KnVtQ2B1BmIdByR0rSrqWnmMST0biKpCAg5cZ6iQIJDxMwYolZQvutGIOJjxNdDBUIXLIFQhsINsh9q6VxZfz6keQ60pg0CmzWHDD7deaWAo2Mps47gT59DR61ycax+IuD4Gl7c2YbBccH160slkYrYZBhaxJ8z4UDssYqSWMR4c1qf3SrP2kAKfORahOvFgnAgCfA0oHkxQFIE4YnIsOpPSufFcrXDAKReD4UMMpJZSGiY6eVCXyyPEmfrUyQA2yx17GkY9oArsYUQMUYyR/jXAHuQrBkqW/WuGwFiCDxcdPCsiMIRfyEMGgR1I5NbgSczYAQD60tBDNkpKkHEHy5owCVi2PSORHArSBnFGKw1h+8dbUQIKwQZJi/hWjZlJbm5J8TSjOSkm5FvK9IGyAVtJJjLz8KMst5uxuQOLdaHMmMrqCTz1NcykZCAQR15iopB1qWa5hT4mjU2ygx0jxoQcZAYwREeEia1IHa8mYyXrHM0IWYpDByCJB/nXIATZobpWWAbEZBjAnm1YCFIKjExDTUiZylypLgSCZg3pq7Tr1soIho58p60CqWyMZ43MeBoW/G9xBvSQKAFJAIk3X/AAohlsUiLAyh8hzS9ZDF2B7Rf69RTJQKzIMDxjQ8AKQY3+oppYxDRM89YrIAX1/lQmwkWPBJ/jWRD/IyPG6jwoDDdydTx4VynMG+OJ5rDcAJyLE0gMn9eaEsonqPH/CuELeZrji35W8KdEdkAbUwAzINopWsKZ8RwaeiZG/HhUMG5YuD1FvvWllBLG7EG3pRMgi44uaURx16ek81EE0FCpiDBaeY5tSswxfYVgABV/hNNGPXoJBoCxVjl3LBj1q0SO1ozMSxtYL5iKzUuJbGJFlbwrQGJDDgKAB6805FUDmR4mrQyDqULqljHR/tFExGCopxXiazYjSABa5P1o9aqVBcxyD97VnpRyaTlj7PrN4CRjULgsxAW4P6VQ4l7nrx6UpzBLG7Hp5UcsukTOxkKRz19KOCAT5CiIkqpsD1qxF+Kvx02OSzzDDoRMUvpSgXLhkaMq5IclJgqRwR/TROCtibrBIHjzFN2fI1KzHWogk4+QNqmdCSWkAlgCPI9a0ZgoTIIrgxsB7vStPHtzIDGJ6TeKDvYwbKIIjqB0rmYvsDlfM+FCwLZjksxYm8WHpQCFuqdxMk+AJ6UUEh9uJIF2FLdwCp2N549IPFUIJaGkqRm9zIkeY8KAoQrun5EyKVscoVgEnIqwXmTT9bmSjgdCB0HnTFFJmI2OquYhY+tGiGFGw5GcB6CtUpszK3KnJm8pogyjIqwBUEz5H+dEW35UDNJRsJc88EMFjE/euKkqybQDiSMjSRtBAdhBPX+dBv3YZJkCCSZ9OlCo04v8jhrRSGBAUQXA5g01T8c9wUMzGBn/Gl6wGyZAJsAPS9dugTsxjHp62tS2EB7N42sdgRAri6p42B/hWKrm4MDoPEUGtsYZTFyI8KchgYxJPDeHW1HTFIWWKnvuVEx4TWPk5Cg+ZH1mi3k7CGAgxBPUjzpbrmpcGLcVgmgdjjJWjuUSSPEWpilnQmZHIjxPjQqO1PECTPiTeazW6r/wCtYkXE/rSTHOdRWUeXCYgf0ki5oUaFUloKlVbz8aUCMWmGdlJTx6Sf0pufva1CrGwKCwPpSrdgCNnIC3aY85NciM0iYPXyHNdLbimpbuv9tT4yaBoOWEq1gU8COtKfkmArPwR3KSfIjoacHOyL2HI8etTWUgi7mZ86bru+YGIBjEeEc1Ima78h2gAr/wBqX2T3Wg3HobVuwFRa6t970GvYHIWIAMT1mkARPusMsj0Xw865NeclGiJB+9JKuN+zcP3WPlBgUbQhCLybGOPOsrBDc39sgEgkxB4m9NUsVVTBMSI6UIAKAN1PPiIoSxEBeCZYjy/bW0ZC4xDghVksw6zXMAJZWgqJH+oGiYKyBWH7sgesHpQ7ckTExFvt40kc5UhVnETeKxoJN8h4+QoEFgVPHINbIRSY8vvURq2/LrcfwrWyUrtnuMg+lYhD3In/ACoS7cGIi0+dRDMhd+tv1oQT+QubiKxsACoJzgT9KBdjKZUiJ5PiaiHAjEQYB6eVJcngtA6CmKA5Y2jqR40L4mfGf+1UbKaAG3G2sQWkNPrTCLY9KBVGUnuMyPWi2Ox7iYXp6UMTGXEwODx61w2CCIsRFc0kC8g8etAMie60CslAwwRkojIC1apBIDWrgwxE8qIJ/hQAAiCe6xmtEc0i45oZIAPWmkELityetLYYgTxRJQNRYEqJvJqgXMzzArtYkkxHXyrQO4+dxUKwGSGWJg9R5Ul2FhEWimtrfIkCQRBJ6UncO0nwpUgwR+MHoINFEqZ5i1AD2+vNOCkkDpafSkhCko0zwbUecEAix5FG6qD2iSB/0aA8ibz16isyMDGYnG8eP1rMgVI5ixoXjIC8x+tbGIgXigRn/scRwBY+NLYNJgEv0pybFKW9aNAhZjsaDyIowzSUohggEMDa1GXOP4i0c+VN+TsVXyIzmx8jzaomOYJ4CwZ9elKloHC2MaMwqEGfzHhWjScnWJLXv0rvjsvxdq7NqDYHiA3W/FW7dOpy2348o3I1HmPI1e0ODPrNkLMVJDWHB8qL44bYwKWRhcHxFK2E5AzLWzU8RTtJglj5hfClYDYe04ldfhJJnnmo3fUVIYgsTH26VTtOs6/cYDiD61JpTU5BKY2k+AAt96FQu2FCoi5v2uJLQZaTWIn9osHgQUJnpzaqhpy1nIfipia89tLKV1iQpMZHxbxpXUi+YyN0bGRVTiQZbxg2qlgwBIPUBVHPNz9qDYU/tkiDrNo8DXF1Ziw/E2kfarplysvwOfEIoB7XEAVNtRtrAI2TG2MQLVVrQNrBZpgxjWAKZdmgR+I8qyhaY74xhjkDYSQPHimboxB5jnypOtikETjzfoacNmanWYMmGJ+9DYpCiiAKRJkD6zzTMlUxJCnp4UttioZQzj2+gigOwsotfnzIFRQMLiSHHe5NxxQnCGVvyAuP8KJYQ61HPX7RQlRsD7CI4A+lLqATbk5iuLMPGCD1pSZKuxnAle2BxxzWtisFgSs8dbda6A2nHkEntoIWxyQFRju/bHAH+dM9x2UBlIbWgV26EzP6VgTBS3KYxA6+dDrYsQRKgn+4BUAwHFc0mOvkZrm2KDkDbnzJPNcGjXIvnePCaEg4zAxEx60kLbEdwtNj6nmi1viSvJIsfGOlawUq3jEx0vSdY/EC7KZHmaphlElOzYqYnEkAw9J3QpHtDJHIJI/b51283Xui5BXxm4pS7ZhBENxHhQ3cEjWMIcjPB9Y8ab7SoUIIbmZ4k0tpQjYbiwUHoJvNNcq4AIw1kz4nmtINWYQFNjIJiOgEVyAEMFvJ7fI1oAEqgJmwPnRAKIC/f0rWwg0qxWBd4x/xrRrDCDci0HwFcXKFYE5Wtz51hchQzGciQPToPWmNgAQqssi7WB9aEyUwYWWxPjRFlISORcz4c0ssWJsebelUEai4vJEiD/CsbtUW4uD+tErqVMAy1vSgEFrsTBsPKOKiMZm7VmWHWuZcRcSG/nWgK7m8ACa4kmMebQfCpIhoEajrJGUiD6UOHN5JPP8ACtOJAngfxoGP9uefAfSojQhyYesEeFcyMVH9PEdBRa1zXwPT+daZjHmDJFRI0e2onryJ4mlkESW5NyfKsyZzfpaK7aJKpeOprMCLRpIB4604gZEm0UOpLnz4phVR2n1pAzXJtwa465mb9IojIYeHjXEqYIseJqoSrWO3i9HrTIrF780B1tNzBHNMJZNYcc5WrLEodWZSgTLVc7CvMREVHt1EtPAYSg8AKqTtAdici0wOCOYrtrnPPIZEGWIsJtNbMnnFCqCR5U1ZX9JrSkGG4XqOs1yDliZIBtQzSMNzJFiY+/FcyWONjxPnWzefSfWsJJA8eayIPtsdeZEt0rApKjz60ezauCqOBx9aUGyUutwLRVKKAlUFsD+LC3lXbTsE5G0ASObUCOCUYr28GmuSVVWWADJbxB6VFom2EozZyDA7eTMVqd6lUAWTcnqBQOdn7vxYzkeSaWGIUKR22k9ZJplYRnyMacy/JEBPDmnf7ke3rdzZOo54vNTIHcsNdtYmZ8BFB2s7HpMkdLdKHA8tr9TB8hDsLYnpHqTVitqcqiiD4/Wa8/ZtPYgxOsTHjB4qpQNShv3fxpii3ZRv+MPbLK4xNyvoKg17V1nW4JB1nIK3Bg3FN27yrIpcA7QQPEUoFRrLEZhDKsf6uooUw5FxKgrf5hzI/EDK/TiamT5ORcMsq3cCPCsDqWGthMKSs/eja6ZlcARyPKjlfuXTbdgkk72LA4gEDykVugkDGQQgyPmelCXyydniLJ/qPFbq2SGLLDowEeRFajbKVMIe5fSVeMpvH0owVCRNyRNTMjA4zlBPd5UcBYZrkzP61zNz4KmOKsy2m0eIoPcBX+32s5mfTmtfbreNWu4VQJ/U0tJTYh5sG+9RbM2hkYibnr53qgyF1tNgCGHWekUoksfU9xrGTdJVBOBmelSmSbpm5oUGHIgsf40QdvbNrAx96HWChBZYSTWEw7MfxYRJ4FLmbMqIlbMYsVCKcmFvrWKX1527uQTQyIi4c8R4eNHiywJJLXvUQYhsVcEAiT50HYoJIJA4jzoWUuZYxaRFPzJUSIMBQo8BNQAwDiOhi3pxXCASDcLwfEE0aCxf91pFZsYghhAUMRHnxVMEM3fHIB2K3uaisnHoRUak5mCVxE/Wmru2KCJIJ5jggxIqZy2ZmxMgfXil4JM75Gp3Ga3Ii/S3NJ0K9soAUSjD9RVesq2vajSMx2/+Ug/wpKa2/wDWf2/h6c1lqxfwFqWV7jk7rceEU0awqkQZAv40I1bFPaYUfket6YrFbDuNxka1yDQevtBlrH+Nb2IwL8jihAOQHNrjwisLkMRAAUdbyTetELyUuzKO8/i1PTEqIF0BMHx8aTGRsLiDH60SsS5J5YQQLWrU3BhgMHuQRLCD6VyAievSixUpPEgQa1QpGfqPtUUGHEqALHkmhKiWBFrx61yr3Ak9rmG/jRNKLJ8e761FFC3BUlYm5IYdRR6pVjsggRYfSmoqOmR5ANEr6xoAJBJiwqkoAOxfbcr+0kBT1kRScTkgNxyTVGrFlCsoKsTkfC1qVBYhGGJURNRBN2ggcEi486EfkYPb1oHzUBuEBHb6VqFcSQOWiaJIIrBMiMjI9KIKCwm8/wAKNiDB8JtWaxJ4i0iqRg32xz9hRMgYCKKISOvNdxc80SME+2cYHSu1JJBP2pypkJgyeaoGpUUsBYc1SUFWvWrE5XMggfwrvkd2s5qJUHJR4C1ZlqEOb5AAgdK4fIQbVkKUYyQ3SRFXwQPxz2XWUUCSeRMw1Mcq4yMD3O0iPxBrXwIZox1SBsUG/lQsXMjWAg7TJE8UoCbFgpUEAAllPU5dD6RSHMXU35+lP2bXnZKgqwvNIcFiqwLD0t61ls0giOwHmbml5SCB0H8aYbDECD/T5Gh0oW2XAAiQfIdKNic+uQt+eR6UC4wAFtVDELOQE3AjpQME9sEdbUOhQnISVEYzJ8q5JY+KCCCaN9c6lI5uPtXLiFwH1pUOAcoQ2sBi0mBwKUx91MCRYRPiRVMsBIv5HmgOsEgxEXNaMkyK+tubm30tTgkSScZJIHQmLVray2I6XM1zLkhUm6wY9aEDI8F2ciHmFPSRNeloTXu1J7l9i/lNRkQxIAxa49eTTE+QqqVwuYiKOvg3w1NkvyUB+Q8kAHiBeR1+1EdMaCEP4kC9hPnW/HX3NxDEgqZjxp28h9BQHIFhkvpep9PAJU+mRZbGbEkFpKgC0jkNVLbY+Opa5WO3x6VLgAhyIkwYBuJMfpXoatWp1X3AfbMX/p86e3guVn8CNCr7ze6Qqoucjp4R9aLB8DtAkbC3J6/umkOoRWTW+aEgs3WCb/xrteWpBqMlRlAPJ8DT1fMLzIc05fiCzYMAoB7nn6xeltD7Ar2Mcjiwpfx9p2MDt7SJI680zcQpUKeTcfSsJN0bbSsJDOthMECB6GiH48yBYjwtapPeK7SQANb3C1QhGwjW0YC5Y9J6UNQyTkLOJBbAiY+gn+NEjswEsVABJYX7o5P2pO1RtVHImCVn16mt1vip1sbGZrXLVmekxi7tmwKm6QCbN9OaoZteuxgQYuJBiolMEq5tbGeYHjVOwlkVzBx6DzrHtLNpJc/In3Cjf3F7WBM+E8U3SsryYUC/jSszsfEiVHP+dUAgJ7UR+4EeXSmWZSBRwCwAlhEGiCk5ObR/0azUjIlvzYyfrR7BisE8m0eMUomL2Nr06/dJlBYAcz40AIIJUZAn73rgM9Zkdsdwre3UAuXIlK1szhA7IQJsvBJEeFL298tMx19Kcy7PaLkWWGE9Z5qZySL2E3+tTFaHaWBEMcVYAMR963ZqXXtYqSUHXwNK+JgrgNwI/WqD3EFhYXP3rGTUUe4//E+5/wAGv/Jh/wD+Z27dmrodTsdcevWvCaAoi5W7rXqb/wDl22f8Xq/4/WrJsQIuzYOMEJNvWvMKScgbm5bxmtIMGBsQGY2HP04rvcXcGxBBbgVwAEhhKWJ+tCTiwPjwRW0qgzJtkjI+f1FhS22K5wIIPBYdaYwDTkBEWt1rsVUBuPS9SQNmBBdeswfp1riCWIFl4FaD43N4ji1EbYmIJNqiFqwJEUb4e2SBcwGoX7WPAPTwrG/pJ8wR1NQDtYOvUM4lrn+FZrChDA8hSNbBmgktbtPhTQyweoi3rVopC1n21aLza9dKsVyBBM3/AIVqqp1l2PdHHnXNrbAQ3HI8Kk5FixGRBMiTehW4ON45msveK1So1tDE5XNRDEOSm0RR6pJI48/WlayBfpT1gCACQbzQhGMQoj6VqghJItFzQwGZVbkG9OS5UKZme3zvekpMJwAIETen5LCjkDrSmk9xuR2t4EjrWZERFh1qKTWmCRYQPvSTuUuogFgZA8TRZtsZjyYk9AaBElwwHcT2t5isudDKK9227mFcsZdY4t2j6UIYe0GXZDKCpBn6Vms7FyDKzBj+VunWl5uLGw5Mjx4qbBKWBuOKg3giBbmiEKoBkjtt/E0LXEkkOJnwv4V2tmV1JEkyMT4eFY9rOnrR2Csx23kKLDjwo2IU9ojt69DRa1nNFBALDt8Y/wAqPamvUQzGyAxPXypU5JpTBOFzJvAF8vGKxDnAFwZAAHka1Q+0Pu1CABOJ/wBNretH8VdgK7R/bKqWtBlr2FcevstwdF9dISoZTjNysx6VuIhQAbkn1AqhsGc5mNqS0EQSHA7fpS9WxUUjAZx25cAzenntxgnwptilDBjK5HqCbgUtyqgKT+U9vhFomqtu2WEAZKOYiTUewBiS1yRMedduXRx6QaL/AGySZng+GNBsTElgbEc+tEkBBfsiCv8AGseWDIvkAaVkHEErDFhA81HmaxgWUmYMRPlVS6CXLGwXxrPbUCXEGTbpS4MwTBG1BXLwTYGKWoknZlBvKjy4qjY0Kyi8wQOgoNSqArSO6xA8aBWIEHR7qdiwVJ7urWmm6N7quLnsICmekU/XsAZsYGYC5dBWa9Y2l1wkHuJPFrTR1tvBvlWodi19v3WZZzBxFrYgTbxpu5QJfeuIUhlHBj/tRojMwTlVOIbgeHNN3Dvh5ZScJ5sI/lXKZ/U3ESS7tDKxKgALAxnpNI2f+yJ8SW8oxAqvYzIZIDLIDDkibC9IAWXWJbkSODNdOHEyc+1j5AdtKgBVyKtiG9RzT9YQMJUEDlvLpNIPubWCgBWsbdLcfxqpAunSVBnY0mI8YgUd9KaNfXzt4MaNe1i3QGQOD4UGxATkI8QB6UULgEYFiZJPU0RUAIAeO0j/ABrCcGmpEgPtYkpHgT4U1PBpkkSPQzR6QuMNc3g+lZnBjpMAxWkoMdM1vbwOtTi8SWHWj1g/i5kRbyoJAbJx+6IiiUlQ6xZuDWmtmUwy2IDRN4oXPXnypZ2AAqGnqR4ngVym4VrgAYn6XpRNgO0Mw1/i0QPCjfXkAecOp/hWdqHGLzeaJiH7CbwQI/nVstGNm2gW4B69amYXI6sAcaejwBqIJe8Dp9aUQFaOCeZ6QYIqWGTqDtQVSGPXj/CnLsQgoe3/ADvQbNckFbDn60DMSkicutvpUlBdNjZBkASOR/hW6yQIFzPB6V2uylZ5EQbVjSQcfr6eFaRkIqRJntsTXKVcBse08jqCKJTikcBhiQeYoW4yQ34I86QByy1FAJB61vaSFS0RP1oFI/cIJ4PSaIDElpgrf6+FRHRBysAeBPMURupJi/AHSlps7uBPWfXpWue4kGJ4ikgkbKJiRPPlQMc8jHc3EcXrRCr3QeZPhNAGKtAEReRQRuvXc5cpf1phAKqpEfut51msZkG5HWjlUNrg2FUEZsJCmIEcz1NCd2wSJkmLdIrDAm3d0JrJjuHItFVECrHFWJ/K5o5CrCmfCaVcYwfE/wCVHft8DyPChsYYamYtxT8iAF4ip0IUi/086dLEksbGmisasM9rR186PUSuYXkXVv4ikglY6x9Jo9MhsP2CCfrVNloaWJxAGINvqKJWCzlBxg/SaNgGEzkcSQB0NhesYnWsOAW4IA6VEKA6gyCJj1PFNYqgQEhQDYeZrmZX1qdZkEwy9YHFLYAqw2GDIgeHWqCHIzoRn2qZk8nwpWxMmO07P2/cr5UTMqqQCfG9qU5d1AIgG4I6etZaNcidrQAQbHg+NqwFtjTMccdKzaJsoBE2XwB6UWtyr49HAsOmPNczqirPAIxJxFp63pS5bCXbgQpnj1rS9yRwQIni1cqyuCmMzeelZ9qg0uQ21IiFlckK0YRaGEC/nXJq2sD7UONInGcZHl5zS2de/UDiSolR5TjPpTVK6/judyGVVGBHPdPTzrlB0br8GrtCJsaPcbevaDyLC0+VJX20BUfgoOOV7NJFE2xtQZkCsAnYxHRhA+vWkjOYaxeGYDr+1Yo/9JeR5X8Om8o12ygcvyD/ABocAHBNj1Joig1NnywMRTWbMD3gADaR/OvTMODzRKkmdMbTebVlmYSAqyAPGu3KFOL3J4M1iEggMfxFxHXpW1mTD8DduKLiGyyAvSTvUFr5Dx6cU3IGRlb8pj9KSIJJIGIYADiJvVBSYIwyXqRMdR4UKhGdk/AgSB4U/EyDHJBpW3UcmUQTGRHiB0rL6NLkTgYYqI1lgf5V6fw9WjbsTXtVmZ1KqFtJItUiFV1+2LyAL+MzRptVWUoSSpmRyD4Vnu+Tf110MXQi68ASmR7geF8z6Usko5ZoISYYGxW0tT/jnFjsMFMwrBzIBKGx9YpJ17HBxUqoYgz4RzXLlwr0b7tmKM2BxyLkkx1jupjKoY7GXEEggR0iKSBtJljfK0COsWjpFMLCzck3Mc2o5bbbeDXcLnlbA2C8pBVAMALEkczR7da6p3ZZDdKqPCBKx6UbvgFeATBg8iTS4zxgd6m3UBib05ZmVyv3AXYqAoqkgTHXnzo47ZZZ1gyY54pLoFEBjft+3WtG1yr60aWxJJ6R1peQWJCUgABzYDn0FYgGxsySVAnHwNYMShKjiIFajnKYhiPxHFdTjs5dhMz3lrLWoCVCA2PcAekdK2CCJsBeIi9AVOxSCR1Ib+VJGIpLjIRAkT1i9GCIAPSzR51qkLJEL0HnArLG4YCSInrSAOXaSwuYiaWHAJdbEWYU4C0kTbmp4AJPQn/tURUmrW+piwliCSfTipG1kSqmYEqx8+aY7Ya2ViYIER96VmMuy6m0HxI5oTgnY0EAXuBYdJJolUe1NxsFzPTwoewwTyLKPG3NH7hfWA7TiACIuYmlWwgElH47n87XolPfI/aOP41y90HWo7QD53oyQt+siT61rAQEFCSOrQfGCeKxNWEBhA/q6ZdaxtiqDDEsOJHM137Xd/ygBhNvWlEwdkCSvSwBrCYsGAQgEk9Ca47GGWtvyeIApbMSxAgiwvwYpA3CYgxEEDmtc8mRDfkPStVnSe0SBAJ45oDBY+MXB/lUQGUD1+1HGKhgfv41hKlxkO3y4jxrSQSV1zzafSoh3x5QkkwSOOk9a0BRcH61mtSFxAi3dl/CuJFwbEcR41EBsEkNMr19ZoQpaSpMrefKiBJ7eRz9K1RiSoJvxQRoCqO+CBceVCyi7ePTyoNhvjwBcUbN2gTM2oaNCSwBJ9MfWq5GAJESJP0qWEV18PA+NNsAP3A8HzNRDMpMeJqhbAgzienjSVwYqOASBI6RTbEMokggQRQJQ2pIUAFGIsRfr1pWzYWYhmnwPAnwrs8UXG2IvJnmszWRJAWP7c8g/wA60ZP/2Q==';
+const rustTex = await new THREE.TextureLoader().loadAsync(RUST_URI);
+rustTex.wrapS = rustTex.wrapT = THREE.RepeatWrapping;
+rustTex.colorSpace = THREE.NoColorSpace;
+rustTex.anisotropy = 4;
+
+// tri-planar blend (GPU Gems 3, as in the shader), squared for rough linear space;
+// explicit mip level because it is sampled inside branches of the plate march
+const tex3D = (q, nn, lod) => {
+  const w0 = max(nn.mul(nn).sub(0.2), 0.001);
+  const w = w0.div(dot(w0, vec3(1.0)));
+  const tx = texture(rustTex, q.zy).level(lod).rgb;
+  const ty = texture(rustTex, q.xz).level(lod).rgb;
+  const tz = texture(rustTex, q.xy).level(lod).rgb;
+  return tx.mul(tx).mul(w.x).add(ty.mul(ty).mul(w.y)).add(tz.mul(tz).mul(w.z));
+};
+
+////////////////////////////////////////////////////////////////
+//// PLATE : DISTANCE FIELD
+////////////////////////////////////////////////////////////////
+
+// Polar offset-brick floor from Shane's "Cube Subdivision". Two rings
+// (10 and 12) are raised, carry the glowing cells, and spin with the
+// ball's flips; the rest of the plate creeps round slowly.
+
+const FAR = 10.0;
+const TAU = Math.PI * 2;
+const PITER = LOWQ ? 72 : 120;
+
+const hash21 = Fn(([p0]) => {
+  const p = fract(p0.mul(vec2(623.34, 456.21))).toVar();
+  p.addAssign(dot(p, p.add(145.123)));
+  return fract(p.x.mul(p.y));
+}).setLayout({ name: 'h21', type: 'float', inputs: [{ name: 'p0', type: 'vec2' }] });
+
+const sBox2 = Fn(([p, b, rf]) => {
+  const d = abs(p).sub(b).add(rf);
+  return min(max(d.x, d.y), 0.0).add(length(max(d, 0.0))).sub(rf);
+}).setLayout({ name: 'sb2', type: 'float', inputs: [{ name: 'p', type: 'vec2' }, { name: 'b', type: 'vec2' }, { name: 'rf', type: 'float' }] });
+
+const sBox3 = Fn(([p, b, rf]) => {
+  const d = abs(p).sub(b).add(rf);
+  return min(max(max(d.x, d.y), d.z), 0.0).add(length(max(d, 0.0))).sub(rf);
+}).setLayout({ name: 'sb3', type: 'float', inputs: [{ name: 'p', type: 'vec3' }, { name: 'b', type: 'vec3' }, { name: 'rf', type: 'float' }] });
+
+const smaxK = Fn(([a, b, k]) => {
+  const f = max(float(0.0), float(1.0).sub(abs(b.sub(a)).div(k)));
+  return max(a, b).add(k.mul(0.25).mul(f).mul(f));
+}).setLayout({ name: 'smx', type: 'float', inputs: [{ name: 'a', type: 'float' }, { name: 'b', type: 'float' }, { name: 'k', type: 'float' }] });
+
+const sdSeg = Fn(([p, a, b]) => {
+  const pa = p.sub(a), ba = b.sub(a);
+  const h = clamp(dot(pa, ba).div(dot(ba, ba)), 0.0, 1.0);
+  return length(pa.sub(ba.mul(h)));
+}).setLayout({ name: 'sseg', type: 'float', inputs: [{ name: 'p', type: 'vec2' }, { name: 'a', type: 'vec2' }, { name: 'b', type: 'vec2' }] });
+
+// one glyph per stone, angular strokes, 1 unit tall, centred on the origin.
+// all three letters live in one function and are blended by weights: picking
+// between separate glyph calls with If/select silently kept dropping the D.
+const SEGS = {
+  P: [[[-0.39, -0.5], [-0.39, 0.5]], [[-0.39, 0.5], [0.23, 0.5]], [[0.23, 0.5], [0.39, 0.34]], [[0.39, 0.34], [0.39, 0.16]], [[0.39, 0.16], [0.23, 0.0]], [[0.23, 0.0], [-0.39, 0.0]]],
+  W: [[[-0.5, 0.5], [-0.26, -0.5]], [[-0.26, -0.5], [0.0, 0.14]], [[0.0, 0.14], [0.26, -0.5]], [[0.26, -0.5], [0.5, 0.5]]],
+  D: [[[-0.39, -0.5], [-0.39, 0.5]], [[-0.39, 0.5], [0.11, 0.5]], [[0.11, 0.5], [0.39, 0.22]], [[0.39, 0.22], [0.39, -0.22]], [[0.39, -0.22], [0.11, -0.5]], [[0.11, -0.5], [-0.39, -0.5]]],
+};
+const glyphPWD = Fn(([q, pick]) => {
+  const seg = (list) => list.reduce((d, [a, b]) => min(d, sdSeg(q, vec2(a[0], a[1]), vec2(b[0], b[1]))), float(1e5));
+  const dP = seg(SEGS.P), dW = seg(SEGS.W), dD = seg(SEGS.D);
+  const wP = step(pick, 1.0 / 3.0);
+  const wD = step(2.0 / 3.0, pick);
+  const wW = float(1.0).sub(wP).sub(wD);
+  return dP.mul(wP).add(dW.mul(wW)).add(dD.mul(wD));
+}).setLayout({ name: 'glyphPWD', type: 'float', inputs: [{ name: 'q', type: 'vec2' }, { name: 'pick', type: 'float' }] });
+
+// stairs: every ring a little lower than the one inside it
+const STEP = 0.028;
+// the whole plate sits higher than in the shader, so the ball hovers just above it
+const PLATE_UP = 0.45;
+
+// returns (distance, ring index, cell index, engraving distance)
+const plateMap = Fn(([p, spinA, slowA]) => {
+  const q0 = p.xz; // rings centred under the ball
+  const len0 = length(q0);
+  const scA = float(1.0).div(max(floor(len0.mul(3.0)), 1.0));
+  const rN = floor(len0.mul(6.0));
+  const lift = float(6.0).sub(rN).mul(STEP);
+  const fl = p.y.add(1.0 - PLATE_UP).sub(lift);
+  const isG = rN.equal(10.0).or(rN.equal(12.0));
+  const ang = select(isG, sign(float(11.0).sub(rN)).mul(spinA), slowA);
+  const c = cos(ang), s = sin(ang);
+  const q2 = vec2(q0.x.mul(c).sub(q0.y.mul(s)), q0.x.mul(s).add(q0.y.mul(c))).toVar();
+  const pol = vec2(length(q2), atan(q2.y, q2.x).div(TAU).mul(6.0)).toVar();
+  const sc = vec2(1.0 / 6.0, scA);
+  const iq = floor(pol.div(sc)).toVar();
+  If(fract(iq.x.mul(0.5)).greaterThan(0.25), () => { pol.y.addAssign(scA.mul(0.5)); });
+  iq.assign(floor(pol.div(sc)));
+  const loc = pol.sub(iq.add(0.5).mul(sc));
+  const qq = vec3(loc.x, p.y.add(1.0 + 1.0 / 12.0 - PLATE_UP).add(select(isG, float(0.0), float(0.05))).sub(lift), loc.y).toVar();
+  const eng = float(1.0).toVar();
+  const bx = float(0).toVar();
+  If(iq.x.equal(0.0), () => {
+    bx.assign(sBox2(vec2(length(q2), qq.y), vec2(1.0 / 6.0, 1.0 / 12.0), float(0.01)));
+  }).Else(() => {
+    bx.assign(sBox3(qq, vec3(1.0 / 12.0, 1.0 / 12.0, scA.mul(0.5)), float(0.015)));
+    // engraved stones: rings 2 to 5 only, one small centred letter cut into the top face
+    If(iq.x.greaterThanEqual(2.0).and(iq.x.lessThanEqual(5.0)).and(hash13(vec3(iq.x.mul(1.731), iq.y.mul(2.417), 4.7)).lessThan(0.7)).and(qq.y.greaterThan(1.0 / 12.0 - 0.05)), () => {
+      const k = pol.x.mul(TAU / 6.0);
+      const m = vec2(loc.y.mul(k), loc.x).negate().div(0.07); // upright from outside the rings
+      // P, W, D in turn along each ring, so all three letters show up evenly
+      const pick = fract(iq.y.add(iq.x).add(300.0).div(3.0)).add(0.01);
+      const g = glyphPWD(m, pick);
+      const cut = g.mul(0.07).sub(0.0075);
+      eng.assign(cut);
+      const carve = max(cut, float(1.0 / 12.0 - 0.018).sub(qq.y));
+      bx.assign(smaxK(bx, carve.negate(), float(0.002)));
+    });
+  });
+  return vec4(min(fl.add(0.125), bx.add(0.004)), iq.x, iq.y, eng);
+}).setLayout({ name: 'plate', type: 'vec4', inputs: [{ name: 'p', type: 'vec3' }, { name: 'spinA', type: 'float' }, { name: 'slowA', type: 'float' }] });
+
+// uniforms stay outside the layout function (they are cached per backend)
+let SPIN_V = null, SLOW_V = null;
+const plateD = (p) => plateMap(p, SPIN_V, SLOW_V).x;
+
+// the ball as a sphere, for the plate's shadow and occlusion
+const BALL_C = vec3(0, 0, 0);
+const sphSoftShadow = Fn(([ro, rd, k]) => {
+  const oc = ro.sub(BALL_C);
+  const b = dot(oc, rd);
+  const c = dot(oc, oc).sub(R * R);
+  const h = b.mul(b).sub(c);
+  const d = sqrt(max(float(0.0), float(R * R).sub(h))).sub(R);
+  const t = b.negate().sub(sqrt(max(h, 0.0)));
+  return select(t.lessThan(0.0), float(1.0), smoothstep(0.0, 1.0, k.mul(2.5).mul(d).div(t)));
+}).setLayout({ name: 'sss', type: 'float', inputs: [{ name: 'ro', type: 'vec3' }, { name: 'rd', type: 'vec3' }, { name: 'k', type: 'float' }] });
+
+
+////////////////////////////////////////////////////////////////
+//// PLATE : SHADING
+////////////////////////////////////////////////////////////////
+
+const SKY = vec3(0.018, 0.022, 0.03);
+const uFlick = uniform(0), uFlickT = uniform(0), uBurst = uniform(0);
+// glow colour of the current round: red, then yellow, then a darker blue
+const uGlowCol = uniform(new THREE.Color(1.0, 0.1, 0.06));
+// countdown tick envelope: the letters flash on each tick, like a wrist-bomb display
+const uTick = uniform(0);
+// the letters always take a colour that answers the rings: cyan to red, violet to yellow, amber to blue
+const uLetterCol = uniform(new THREE.Color(0.1, 0.85, 1.0));
+
+const plateShade = Fn(([ro, rd, u]) => {
+  SPIN_V = uSpin.toVar(); SLOW_V = uTime.div(16.0).toVar();
+  const outC = vec4(SKY, FAR).toVar();
+  // jump straight to the slab, the plate never rises above y = -0.99
+  If(rd.y.lessThan(-0.001).and(ro.y.greaterThan(-0.8 + PLATE_UP)), () => {
+    const t = ro.y.add(0.8 - PLATE_UP).div(rd.y.negate()).toVar();
+    const hitM = vec4(0).toVar();
+    Loop(PITER, () => {
+      hitM.assign(plateMap(ro.add(rd.mul(t)), SPIN_V, SLOW_V));
+      If(abs(hitM.x).lessThan(0.001).or(t.greaterThan(FAR)), () => { Break(); });
+      t.addAssign(min(hitM.x.mul(0.85), 0.07));
+    });
+    If(t.lessThan(FAR), () => {
+      const p = ro.add(rd.mul(t)).toVar();
+      const id = hitM.yz.toVar();
+      const engD = hitM.w.toVar();
+
+      // tetrahedral normal
+      const e = 0.0012;
+      const n = normalize(
+        vec3(e, -e, -e).mul(plateD(p.add(vec3(e, -e, -e))))
+          .add(vec3(-e, -e, e).mul(plateD(p.add(vec3(-e, -e, e)))))
+          .add(vec3(-e, e, -e).mul(plateD(p.add(vec3(-e, e, -e)))))
+          .add(vec3(e, e, e).mul(plateD(p.add(vec3(e, e, e)))))
+      ).toVar();
+
+      const lp = vec3(LIGHT.x, LIGHT.y, LIGHT.z);
+      const ldv = lp.sub(p);
+      const lDist = max(length(ldv), 0.00001);
+      const ld = ldv.div(lDist).toVar();
+
+      // soft shadow: the plate itself, then the ball
+      const sh = float(1.0).toVar();
+      const st = float(0.0).toVar();
+      const so = p.add(n.mul(0.0015));
+      Loop(LOWQ ? 14 : 26, () => {
+        const d = plateD(so.add(ld.mul(st)));
+        sh.assign(min(sh, d.mul(8.0).div(max(st, 0.001))));
+        If(d.lessThan(0.0).or(st.greaterThan(1.2)), () => { Break(); });
+        st.addAssign(clamp(d, 0.01, 0.2));
+      });
+      sh.assign(max(sh, 0.0).mul(sphSoftShadow(so, ld, float(6.0))));
+
+      // ambient occlusion, plate + the ball hanging above it
+      const occ = float(0.0).toVar();
+      const sca = float(2.0).toVar();
+      Loop(4, ({ i }) => {
+        const hr = float(0.01).add(float(i).mul(0.25 / 4.0));
+        occ.addAssign(hr.sub(plateD(p.add(n.mul(hr)))).mul(sca));
+        sca.mulAssign(0.7);
+      });
+      const bc = BALL_C.sub(p);
+      const bl2 = dot(bc, bc);
+      const ballOcc = clamp(dot(n, bc).div(bl2.mul(bl2.sqrt())).mul(R * R), 0.0, 1.0);
+      const ao = clamp(float(1.0).sub(occ), 0.0, 1.0).mul(n.y.mul(0.5).add(0.5)).mul(float(1.0).sub(ballOcc.mul(0.85)));
+
+      // cell colour, straight from the original palette
+      const rnd = hash21(id.add(0.12));
+      const oc0 = vec3(0.5).add(cos(vec3(0, 1.5, 3).add(rnd.mul(TAU / 8.0))).mul(0.45));
+      const oCol = mix(oc0, vec3(1, 0.7, 0.3).mul(rnd.mul(0.1).add(0.2)), 0.65).toVar();
+      const glowRing = id.x.equal(10.0).or(id.x.equal(12.0));
+      const isS = glowRing.and(hash21(id.add(0.16)).greaterThanEqual(0.5));
+      // glow state: steady breathing, random on/off before a switch, a burst right before the spin
+      const rate = mix(float(5.0), float(22.0), uFlickT);
+      const coin = hash21(id.add(floor(uTime.mul(rate)).mul(0.37)).add(0.7));
+      const breathe = sin(uTime.mul(1.3).add(rnd.mul(6.28))).mul(0.12).add(0.88);
+      const glowAmt = mix(breathe, select(coin.greaterThan(mix(float(0.25), float(0.55), uFlickT)), float(1.15), float(0.0)), uFlick).add(uBurst).toVar();
+      If(isS.not(), () => {
+        oCol.assign(vec3(0.08, 0.082, 0.09).mul(dot(oCol, vec3(0.299, 0.587, 0.114)).mul(0.5).add(0.5)));
+        oCol.assign(mix(oCol.yzx, oCol, smoothstep(0.3, 0.7, u.y.add(0.6))));
+      }).Else(() => {
+        oCol.assign(vec3(uGlowCol).mul(length(oCol).mul(0.62)).mul(rnd.mul(0.3).add(0.85)));
+      });
+
+      // cheap subsurface: walk towards the light, see how much stays inside
+      const sssV = float(0.0).toVar();
+      If(isS, () => {
+        const sp = p.sub(n.mul(0.0015));
+        Loop(5, ({ i }) => {
+          const d = float(i).add(1.0).mul(0.05);
+          sssV.addAssign(clamp(plateD(sp.add(ld.mul(d))).div(d), 0.0, 1.0));
+        });
+        sssV.assign(smoothstep(0.0, 1.0, sssV.div(10.0)).mul(4.0).mul(glowAmt));
+        oCol.assign(mix(vec3(0.07, 0.075, 0.085), oCol, smoothstep(0.0, 0.4, glowAmt)));
+        oCol.assign(mix(oCol, oCol.yzx, min(sssV.div(16.0), 1.0)));
+      });
+
+      // stand-in for the original's grungy texture
+      // surface detail lives in the stone's own frame, which turns with its ring
+      const ringN = id.x;
+      const angS = select(ringN.equal(10.0).or(ringN.equal(12.0)), sign(float(11.0).sub(ringN)).mul(uSpin), uTime.div(16.0));
+      const cs = cos(angS), sn = sin(angS);
+      const pS = vec3(p.x.mul(cs).sub(p.z.mul(sn)), p.y, p.x.mul(sn).add(p.z.mul(cs))).toVar();
+      const tx3 = vn(pS.mul(28.0)).mul(0.5).add(vn(pS.mul(71.0).add(3.0)).mul(0.3)).add(vn(pS.mul(9.0).add(7.0)).mul(0.6));
+      const tx = vec3(0.28, 0.29, 0.3).mul(tx3.mul(0.35).add(1.0)).mul(vec3(1.0, 0.97, 0.92));
+      oCol.mulAssign(tx.mul(3.0));
+
+      const amb = pow(length(sin(n.mul(2.0)).mul(0.5).add(0.5)), 2.0).mul(0.5).toVar();
+      const type = select(isS, float(0.25), float(0.2)).toVar();
+      const rough = clamp(dot(tx, vec3(0.299, 0.587, 0.114)).mul(4.0), 0.2, 1.0).toVar();
+      const panelSh = float(1.0).toVar();
+      // stones in the manner of Shane's "Warped Offset Block Corridor": each block
+      // a muted warm grey-brown of its own, grungy, with a raised panel and bevel
+      If(isS.not(), () => {
+        const nr0 = clamp(dot(n, rd.negate()), 0.0, 1.0);
+        const rndB = hash21(id.add(0.1));
+        const rangeB = hash21(id.add(0.011)).mul(0.25);
+        const tc = vec3(0.5).add(cos(vec3(0, 1.57, 3.14).mul(0.7).add(rndB.mul(rangeB).mul(TAU)).sub(0.5)).mul(0.45)).toVar();
+        // the rusty metal texture, mapped in the stone's own frame (one tile spans ~4 stones)
+        const lodT = clamp(log2(t.mul(0.55).div(max(nr0, 0.2))), 0.0, 8.0);
+        const txR = tex3D(pS.mul(1.35), n, lodT);
+        const grB = dot(txR, vec3(0.299, 0.587, 0.114));
+        tc.mulAssign(smoothstep(vec3(0.0), vec3(0.5), txR));
+        tc.assign(mix(tc.mul(0.6), vec3(rndB.mul(0.6).add(0.2)).mul(dot(tc, vec3(0.299, 0.587, 0.114))), 0.3));
+        // raised panel on the top face, in the stone's own frame
+        const rS = length(pS.xz);
+        const scS = float(1.0).div(max(floor(rS.mul(3.0)), 1.0));
+        const angU = atan(pS.z, pS.x).div(TAU).mul(6.0).add(select(fract(id.x.mul(0.5)).greaterThan(0.25), scS.mul(0.5), float(0.0)));
+        const locA = angU.sub(id.y.add(0.5).mul(scS));
+        const kM = rS.mul(TAU / 6.0);
+        const mP = vec2(locA.mul(kM), rS.sub(id.x.add(0.5).div(6.0)));
+        const halfP = vec2(scS.mul(0.5).mul(kM), 1.0 / 12.0);
+        const dP = sBox2(mP, halfP.sub(0.016), float(0.008));
+        const hgt = clamp(dP.negate().div(0.012), 0.0, 1.0);
+        const bevel = smoothstep(0.0, 0.25, hgt).mul(smoothstep(1.0, 0.75, hgt)).mul(smoothstep(0.6, 0.9, n.y));
+        const ex = abs(mP.x).sub(halfP.x), ey = abs(mP.y).sub(halfP.y);
+        const tang = normalize(vec3(p.z.negate(), 0.0, p.x)), radl = normalize(vec3(p.x, 0.0, p.z));
+        const gW = select(ex.greaterThan(ey), tang.mul(sign(mP.x)), radl.mul(sign(mP.y)));
+        n.assign(normalize(n.add(gW.mul(bevel).mul(0.9))));
+        panelSh.assign(mix(float(0.72), float(1.0), hgt));
+        oCol.assign(tc.mul(panelSh).mul(0.3));
+        rough.assign(min(grB.mul(4.0), 1.0).max(0.25));
+        amb.assign(length(sin(n.mul(2.0)).mul(0.5).add(0.5)).div(Math.sqrt(3)).mul(smoothstep(-1.0, 1.0, n.y)));
+      });
+
+      const h = normalize(ld.sub(rd));
+      const nr = clamp(dot(n, rd.negate()), 0.0, 1.0);
+      const nl = clamp(dot(n, ld), 0.0, 1.0);
+      const nh = clamp(dot(n, h), 0.0, 1.0);
+      const vh = clamp(dot(rd.negate(), h), 0.0, 1.0);
+      const f0 = mix(vec3(0.04), oCol, type);
+      const FS = f0.add(f0.oneMinus().mul(pow(float(1.0).sub(vh), 5.0)));
+      const alpha = pow(rough, 4.0);
+      const bb = nh.mul(nh).mul(alpha.sub(1.0)).add(1.0);
+      const D = alpha.div(bb.mul(bb).mul(Math.PI));
+      const rr = rough.mul(0.5).add(0.5);
+      const kk = rr.mul(rr).div(2.0);
+      const G = max(nl, 0.001).div(nl.mul(kk.oneMinus()).add(kk)).mul(max(nr, 0.001).div(nr.mul(kk.oneMinus()).add(kk)));
+      const spec = FS.mul(D).mul(G).div(max(nr, 0.001).mul(4.0)).mul(Math.PI);
+      const diff = FS.oneMinus().mul(nl).mul(float(1.0).sub(type));
+
+      const blS = max(dot(normalize(vec3(ld.x, 0.0, ld.z)).negate(), n), 0.0);
+      const col = vec3(0).toVar();
+      const speR = pow(nh, 8.0);
+      const rv = rd.sub(n.mul(dot(n, rd).mul(2.0)));
+      const rTx = vec3(0.22, 0.25, 0.3).mul(smoothstep(-0.2, 0.8, rv.y).mul(0.8).add(0.2));
+      If(isS, () => {
+        oCol.addAssign(mix(vec3(uGlowCol), vec3(1.0), 0.25).mul(oCol).mul(blS).mul(8.0));
+        oCol.addAssign(oCol.mul(SKY).mul(n.y.mul(0.35).add(0.65)));
+        col.assign(oCol.mul(diff.mul(sh).add(amb.mul(sh.mul(0.75).add(0.25))).add(spec.mul(sh))));
+        col.mulAssign(float(1.0).div(lDist.mul(lDist).mul(0.05).add(1.0)).mul(ao));
+        col.addAssign(col.mul(oCol.mul(sssV)).mul(float(1.0).sub(diff.x.mul(sh))).mul(16.0));
+        col.addAssign(col.mul(speR).mul(rTx).mul(2.0));
+      }).Else(() => {
+        // the corridor's warm fill: back scatter and overhead light tinted like its sky
+        const WSKY = vec3(1.0, 0.65, 0.35);
+        oCol.addAssign(oCol.mul(WSKY).mul(blS).mul(2.0));
+        oCol.addAssign(oCol.mul(WSKY).mul(n.y.mul(0.35).add(0.65)));
+        col.assign(oCol.mul(diff.mul(sh).add(amb.mul(sh.mul(0.5).add(0.5)))).add(spec.mul(1.2).mul(sh)));
+        col.mulAssign(float(1.0).div(lDist.mul(lDist).mul(0.05).add(1.0)).mul(ao));
+        const rTxW = mix(vec3(0.12, 0.09, 0.07), vec3(0.45, 0.32, 0.2), smoothstep(-0.2, 0.8, rv.y));
+        col.addAssign(col.mul(speR).mul(rTxW).mul(4.0));
+      });
+      // letters light up only during the warm-up, stuttering with the stones
+      const letterOn = smoothstep(0.001, -0.002, engD).mul(max(uTick, uFlick.mul(select(coin.greaterThan(0.35), float(0.6), float(0.08)))));
+      col.addAssign(vec3(uLetterCol).mul(letterOn).mul(1.6));
+      col.assign(mix(col, SKY, smoothstep(0.4, 0.8, t.div(FAR))));
+      outC.assign(vec4(col, t));
+    });
+  });
+  return outC;
+});
+
+////////////////////////////////////////////////////////////////
+//// POST
+////////////////////////////////////////////////////////////////
+
+const pipe = new THREE.RenderPipeline(renderer);
+const sp = pass(scene, camera, { samples: 4 });
+const ballCol = sp.getTextureNode('output');
+const ballDepth = sp.getTextureNode('depth');
+
+const composite = Fn(() => {
+  const uv = screenUV;
+  const b = ballCol.sample(uv).toVar();
+  const dz = ballDepth.sample(uv).x.toVar();
+  // the pass keeps an opaque alpha, so the depth buffer tells ball from empty
+  b.a = select(dz.lessThan(0.99999), float(1.0), float(0.0));
+  const ndc = vec2(uv.x.mul(2.0).sub(1.0), float(1.0).sub(uv.y).mul(2.0).sub(1.0));
+  const v = uInvProj.mul(vec4(ndc, 1.0, 1.0));
+  const rd = normalize(uCamWorld.mul(vec4(v.xyz.div(v.w), 0.0)).xyz);
+  const u = vec2(uv.x.sub(0.5).mul(uRes.x.div(uRes.y)), float(0.5).sub(uv.y));
+  const res = vec4(SKY, FAR).toVar();
+  If(b.a.lessThan(0.999), () => { res.assign(plateShade(uCamPos, rd, u)); });
+  if (QS.get('dbg') === 'rd') return vec4(rd.mul(0.5).add(0.5), 1.0);
+  if (QS.get('dbg') === 'a') return vec4(b.a, b.a, b.a, 1.0);
+  if (QS.get('dbg') === 't') return vec4(vec3(res.w.div(10.0)), 1.0);
+  const bz = length(uCamPos).sub(R * 0.6);
+  const a = b.a;
+  return vec4(mix(res.rgb, b.rgb, a), select(a.greaterThan(0.5), bz, res.w));
+})();
+const compTex = convertToTexture(composite);
+
+// the original's depth of field: focus at 1.5, plus soft top and bottom
+const DOFN = LOWQ ? 3 : 5;
+const dof = Fn(() => {
+  const uv = screenUV;
+  const l = abs(compTex.sample(uv).w.sub(length(uCamPos))).sub(0.75);
+  const dv = mix(clamp(l.div(0.75), 0.0, 1.0).mul(2.0), smoothstep(0.2, 0.6, abs(uv.y.sub(0.5))).mul(2.0), 0.5);
+  const px = vec2(uRes.y.div(uRes.x), 1.0).div(450.0).mul(dv);
+  const acc = vec3(0).toVar();
+  const h = (DOFN - 1) / 2;
+  for (let i = 0; i < DOFN; i++) for (let j = 0; j < DOFN; j++) {
+    acc.addAssign(compTex.sample(uv.add(vec2(i - h, j - h).mul(px).mul(5 / DOFN))).rgb);
+  }
+  return acc.div(DOFN * DOFN);
+})();
+
+const bl = bloom(compTex, 0.55, 0.3, 0.18);
+const finalNode = Fn(() => {
+  const uv = screenUV;
+  const col = dof.add(bl.rgb).toVar();
+  col.mulAssign(pow(uv.x.mul(uv.y).mul(uv.x.oneMinus()).mul(uv.y.oneMinus()).mul(16.0), 1.0 / 16.0));
+  // the corridor's cool peripheral tint
+  col.assign(mix(col, col.zyx, smoothstep(0.0, 0.3, length(uv.sub(0.5)).sub(0.425))));
+  return vec4(tanh(col), 1.0);
+})();
+pipe.outputNode = QS.has('dbg') ? compTex : finalNode;
+
+////////////////////////////////////////////////////////////////
+//// FLIPS
+////////////////////////////////////////////////////////////////
+
+// six scenes of four seconds; each opens with a half turn about one axis.
+// the raised rings spin with the sum of those angles, so every half turn
+// is also the fast spin of the plate, and that is when the ball changes skin.
+const PI = Math.PI;
+// a round lasts SCENE seconds: 1 s of spin, then a calm stretch, then the countdown
+const SCENE = 7.0;
+const CD = { scene: -1, next: 0, s: 0, live: 0 };
+const CD_TIMES = (() => {
+  // intervals shrink by ~15% each tick, filling the last 2.6 s before the spin
+  const iv = []; let d = 0.5; for (let i = 0; i < 11; i++) { iv.push(d); d *= 0.85; }
+  const k = 2.62 / iv.reduce((a, b) => a + b, 0);
+  const out = [SCENE - 2.8]; iv.slice(0, -1).forEach((v) => out.push(out[out.length - 1] + v * k));
+  return out;
+})();
+const flip = (kt) => {
+  const tm = kt / SCENE;
+  const fs = (tm - Math.floor(tm)) * SCENE;
+  const fNum = Math.floor(tm) % 6;
+  const sm = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+  const k = sm(fs / 1.0);
+  let a = 0, b = 0, c = 0;
+  if (fNum === 0) { a = PI * k; }
+  else if (fNum === 1) { a = PI; b = PI * k; }
+  else if (fNum === 2) { a = PI; b = PI; c = PI * k; }
+  else if (fNum === 3) { a = PI + PI * k; b = PI; c = PI; }
+  else if (fNum === 4) { b = PI + PI * k; c = PI; }
+  else { c = PI + PI * k; }
+  return { a, b, c, k, scene: Math.floor(tm) };
+};
+
+let moving = QS.get('move') !== 'still', kTime = parseFloat(QS.get('t')) || 0;
+let lookMode = QS.get('look') in LOOKS ? QS.get('look') : 'auto';
+const spin = { yaw: 0, pitch: 0, down: false, x: 0, y: 0, x0: 0, y0: 0, t0: 0, vy: 0, vp: 0, tm: 0, rub: 0 };
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', (e) => {
+  snd.wake();
+  spin.down = true; spin.vy = spin.vp = 0; spin.tm = performance.now();
+  spin.x = spin.x0 = e.clientX; spin.y = spin.y0 = e.clientY; spin.t0 = performance.now();
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!spin.down) return;
+  const now = performance.now();
+  const dtm = Math.max(8, now - spin.tm) / 1000;
+  const dy = (e.clientX - spin.x) * 0.008, dp = (e.clientY - spin.y) * 0.008;
+  spin.yaw += dy; spin.pitch += dp;
+  spin.vy += (dy / dtm - spin.vy) * 0.45;
+  spin.vp += (dp / dtm - spin.vp) * 0.45;
+  spin.rub = Math.min(1, Math.hypot(dy, dp) / dtm * 0.1);
+  spin.tm = now;
+  spin.x = e.clientX; spin.y = e.clientY;
+});
+const release = () => {
+  if (spin.down && performance.now() - spin.tm > 90) { spin.vy = 0; spin.vp = 0; }
+  spin.vy = Math.max(-8, Math.min(8, spin.vy)); spin.vp = Math.max(-8, Math.min(8, spin.vp));
+  spin.down = false;
+};
+cv.addEventListener('pointerup', (e) => {
+  if (spin.down && Math.hypot(e.clientX - spin.x0, e.clientY - spin.y0) < 6 && performance.now() - spin.t0 < 350) strike(e.clientX, e.clientY);
+  release();
+});
+cv.addEventListener('pointercancel', release);
+const coast = (dt) => {
+  spin.rub *= Math.exp(-dt * (spin.down ? 6 : 3));
+  if (spin.down) return;
+  spin.yaw += spin.vy * dt;
+  spin.pitch += spin.vp * dt;
+  const k = Math.exp(-dt * 1.8);
+  spin.vy *= k; spin.vp *= k;
+  spin.rub = Math.max(spin.rub, Math.min(1, Math.hypot(spin.vy, spin.vp) * 0.1));
+};
+
+// disc of the ball looks up towards the camera and the lamp at rest
+const BASEQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.75, 0.5, 0, 'YXZ'));
+const qA = new THREE.Quaternion(), qB = new THREE.Quaternion(), qC = new THREE.Quaternion();
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
+let lastSpin = 0, spinVel = 0, lastScene = -1;
+const animate = (dt) => {
+  if (moving) kTime += dt;
+  const f = flip(kTime);
+  qA.setFromAxisAngle(AY, -f.a); qB.setFromAxisAngle(AX, -f.b); qC.setFromAxisAngle(AZ, -f.c);
+  ball.quaternion.copy(qA).multiply(qB).multiply(qC).multiply(BASEQ);
+  // stones stutter on and off before the plate spins, then flare as it starts
+  const sm = (a, b, x) => { x = Math.min(1, Math.max(0, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
+  const L = SCENE, sec = ((kTime % L) + L) % L;
+  const live = moving ? 1 : 0;
+  uFlick.value = live * sm(L - 1.6, L - 1.36, sec) * (1 - sm(L - 0.18, L - 0.06, sec));
+  uFlickT.value = Math.min(1, Math.max(0, (sec - (L - 1.6)) / 1.44));
+  uBurst.value = live * Math.max(sm(L - 0.2, L - 0.02, sec), 1 - sm(0.0, 1.2, sec)) * 0.6;
+  const PAL = [[1.0, 0.1, 0.06], [1.0, 0.72, 0.12], [0.12, 0.3, 0.85]];
+  const sc = Math.floor(kTime / L), ca = PAL[(((sc - 1) % 3) + 3) % 3], cb = PAL[((sc % 3) + 3) % 3], cm = sm(0.0, 0.24, sec);
+  uGlowCol.value.setRGB(ca[0] + (cb[0] - ca[0]) * cm, ca[1] + (cb[1] - ca[1]) * cm, ca[2] + (cb[2] - ca[2]) * cm);
+  const LPAL = [[0.1, 0.85, 1.0], [0.7, 0.2, 1.0], [1.0, 0.5, 0.08]];
+  const la = LPAL[(((sc - 1) % 3) + 3) % 3], lb = LPAL[((sc % 3) + 3) % 3];
+  uLetterCol.value.setRGB(la[0] + (lb[0] - la[0]) * cm, la[1] + (lb[1] - la[1]) * cm, la[2] + (lb[2] - la[2]) * cm);
+  glowL.color.copy(uGlowCol.value);
+  // countdown: ticks from 1.2 s into the round until the spin, closing in
+  if (sc !== CD.scene) { CD.scene = sc; CD.next = 0; }
+  uTick.value *= Math.exp(-dt * 7);
+  while (live && CD.next < CD_TIMES.length && sec >= CD_TIMES[CD.next]) {
+    if (sec - CD_TIMES[CD.next] < 0.15) { uTick.value = 1; snd.cdTick(CD.next, CD_TIMES.length); }
+    CD.next++;
+  }
+  CD.s = sec; CD.live = live;
+  glowL.intensity = 0.9 * (uFlick.value > 0 ? (Math.random() < 0.5 ? 0.25 : 1.1) : 1) + uBurst.value * 1.2;
+  const sum = f.a + f.b + f.c;
+  uSpin.value = sum;
+  let dv = sum - lastSpin;
+  if (Math.abs(dv) > PI) dv = 0;
+  spinVel += (Math.abs(dv) / Math.max(dt, 1e-4) - spinVel) * Math.min(1, dt * 10);
+  lastSpin = sum;
+  // look: the peel starts just before the spin
+  if (lookMode === 'auto') {
+    if (moving) {
+      const tm = kTime / SCENE, fsec = (tm - Math.floor(tm)) * SCENE, next = Math.floor(tm) + 1;
+      // every turn peels to the next skin: blue paint, patina, black paint, mint over rust
+      if (fsec >= SCENE - 0.2 && lastScene !== next) { lastScene = next; startPeel((TR.cur + 1) % 4); }
+    }
+  } else if (!TR.active && TR.cur !== LOOKS[lookMode]) startPeel(LOOKS[lookMode]);
+};
+
+////////////////////////////////////////////////////////////////
+//// STRIKE
+////////////////////////////////////////////////////////////////
+
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let hitSlot = 0;
+const hits = Array.from({ length: NH }, () => ({ w: 0, target: 0 }));
+const strike = (cx, cy) => {
+  ndc.set(cx / vw * 2 - 1, -(cy / vh) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const I = ray.intersectObjects(parts, false)[0];
+  if (!I) return;
+  const lp = ball.worldToLocal(I.point.clone());
+  const slot = hitSlot++ % NH;
+  uHits.array[slot].set(lp.x, lp.y, lp.z, 0);
+  hits[slot].w = 0; hits[slot].target = 0.9 + Math.random() * 0.3;
+  const rr = Math.hypot(lp.x, lp.y);
+  const kind = I.object.userData.part === 'ring' ? 2 : lp.z > 0.54 && rr < 0.8 ? (rr < 0.7 ? 1 : 3) : 0;
+  const sp = I.point.clone().project(camera);
+  snd.strike(kind, Math.max(-0.85, Math.min(0.85, sp.x)));
+  // impact: the ball is knocked back and wobbles, a hot spot flashes,
+  // paint bursts off around the strike and the view shakes
+  const nW = I.face ? I.face.normal.clone().transformDirection(I.object.matrixWorld) : I.point.clone().normalize();
+  KICK.vel.addScaledVector(nW, -1.6);
+  _ax.crossVectors(nW, ray.ray.direction).normalize();
+  KICK.wVel.addScaledVector(_ax, 9 + Math.random() * 4);
+  uFlash.value.set(lp.x, lp.y, lp.z, 0.8);
+  KICK.shake = 1;
+  let made = 0;
+  for (let tries = 0; tries < 900 && made < 42; tries++) {
+    const vi = Math.floor(Math.random() * POOL.n);
+    const dx = POOL.P[vi * 3] - lp.x, dy = POOL.P[vi * 3 + 1] - lp.y, dz = POOL.P[vi * 3 + 2] - lp.z;
+    if (dx * dx + dy * dy + dz * dz < 0.02) { spawnFlake(vi, TR.cur, 1 / 60, 2.6); made++; }
+  }
+  snd.flake(made);
+};
+const _ax = new THREE.Vector3(), _kq = new THREE.Quaternion();
+const KICK = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), w: new THREE.Vector3(), wVel: new THREE.Vector3(), shake: 0 };
+const updateKick = (dt) => {
+  // damped springs for knock-back and wobble
+  const k = 140, c = 9;
+  KICK.vel.addScaledVector(KICK.pos, -k * dt).multiplyScalar(Math.exp(-c * dt));
+  KICK.pos.addScaledVector(KICK.vel, dt);
+  KICK.wVel.addScaledVector(KICK.w, -k * dt).multiplyScalar(Math.exp(-c * dt));
+  KICK.w.addScaledVector(KICK.wVel, dt);
+  ball.position.copy(KICK.pos).multiplyScalar(0.3);
+  const ang = KICK.w.length();
+  if (ang > 1e-5) ball.quaternion.premultiply(_kq.setFromAxisAngle(_ax.copy(KICK.w).divideScalar(ang), ang * 0.12));
+  uFlash.value.w *= Math.exp(-dt * 13);
+  KICK.shake *= Math.exp(-dt * 10);
+};
+const updateHits = (dt) => {
+  hits.forEach((h, i) => {
+    if (h.target <= 0) return;
+    h.w += (h.target - h.w) * Math.min(1, dt * 18);
+    uHits.array[i].w = h.w;
+  });
+};
+
+////////////////////////////////////////////////////////////////
+//// FLAKES
+////////////////////////////////////////////////////////////////
+
+// ported from Day11 Shader Ball: the old skin breaks off as small chips
+// that tumble away; here they are flung by the spin and settle on the steps
+const FLAKES = LOWQ ? 500 : 1100;
+const flakeMat = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, alphaTest: 0.5 });
+flakeMat.roughnessNode = float(0.4);
+flakeMat.metalnessNode = float(0.25);
+flakeMat.opacityNode = Fn(() => {
+  const c = uv().sub(0.5);
+  const s = hash13(vec3(float(instanceIndex).mul(1.37), 1.7, 3.1));
+  const a = atan(c.y, c.x);
+  const rr = float(0.34).add(sin(a.mul(3.0).add(s.mul(20.0))).mul(0.08)).add(sin(a.mul(5.0).add(s.mul(41.0))).mul(0.05)).add(sin(a.mul(9.0).add(s.mul(7.0))).mul(0.025));
+  return step(length(c.mul(vec2(1.0, s.mul(0.6).add(0.7)))), rr);
+})();
+const flakes = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), flakeMat, FLAKES);
+flakes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+flakes.frustumCulled = false;
+scene.add(flakes);
+const FL = {
+  pos: new Float32Array(FLAKES * 3), vel: new Float32Array(FLAKES * 3), axis: new Float32Array(FLAKES * 3),
+  q: Array.from({ length: FLAKES }, () => new THREE.Quaternion()), spin: new Float32Array(FLAKES),
+  age: new Float32Array(FLAKES).fill(99), life: new Float32Array(FLAKES), size: new Float32Array(FLAKES), head: 0, alive: 0
+};
+const _m = new THREE.Matrix4(), _v = new THREE.Vector3(), _w = new THREE.Vector3(), _n = new THREE.Vector3(), _s = new THREE.Vector3(), _q = new THREE.Quaternion(), _c = new THREE.Color();
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < FLAKES; i++) { flakes.setMatrixAt(i, ZERO); flakes.setColorAt(i, _c.set(0xffffff)); }
+const FLAKE_COLS = [
+  ['#0b2a48', '#123d66', '#1b5888', '#2d6f9c', '#0b2a48', '#8e9a98'],
+  ['#8a7444', '#4a3a22', '#a59a7c', '#6f7a5a', '#2e2416', '#b39c62'],
+  ['#0f1012', '#181a1d', '#24272b', '#0f1012', '#3a3e43', '#8d9196'],
+  ['#b9d3b8', '#d4dcc4', '#a9c6a8', '#c79a8c', '#5a3418', '#7d4a22']
+];
+
+// top of the stepped plate under a point (ignores grooves and letters)
+const plateTop = (x, z) => {
+  const r = Math.hypot(x, z), rN = Math.floor(r * 6);
+  return -1.0 + PLATE_UP - (rN === 10 || rN === 12 ? 0 : 0.05) + (6 - rN) * STEP;
+};
+
+// spawn points: every third vertex of the ball, in local space
+const POOL = (() => {
+  const P = [], N = [];
+  parts.forEach((m) => {
+    const p = m.geometry.attributes.position, n = m.geometry.attributes.normal;
+    for (let i = 0; i < p.count; i += 3) { P.push(p.getX(i), p.getY(i), p.getZ(i)); N.push(n.getX(i), n.getY(i), n.getZ(i)); }
+  });
+  return { P: Float32Array.from(P), N: Float32Array.from(N), n: P.length / 3 };
+})();
+const prevM = new THREE.Matrix4();
+
+const spawnFlake = (vi, look, dt, boost = 1) => {
+  const i = FL.head; FL.head = (FL.head + 1) % FLAKES;
+  _v.set(POOL.P[vi * 3], POOL.P[vi * 3 + 1], POOL.P[vi * 3 + 2]);
+  _w.copy(_v).applyMatrix4(prevM);
+  _v.applyMatrix4(ball.matrixWorld);
+  _n.set(POOL.N[vi * 3], POOL.N[vi * 3 + 1], POOL.N[vi * 3 + 2]).transformDirection(ball.matrixWorld);
+  // the surface's own velocity: a spinning ball flings its chips
+  _w.subVectors(_v, _w).divideScalar(Math.max(dt, 1 / 240)).multiplyScalar(0.8);
+  _v.addScaledVector(_n, 0.002);
+  FL.pos.set([_v.x, _v.y, _v.z], i * 3);
+  const sp = (0.35 + Math.random() * 0.7) * R * boost;
+  FL.vel.set([_w.x + _n.x * sp + (Math.random() - 0.5) * 0.1, _w.y + _n.y * sp + Math.random() * 0.08, _w.z + _n.z * sp + (Math.random() - 0.5) * 0.1], i * 3);
+  FL.q[i].setFromUnitVectors(new THREE.Vector3(0, 0, 1), _n);
+  _s.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  FL.axis.set([_s.x, _s.y, _s.z], i * 3);
+  FL.spin[i] = (2 + Math.random() * 7) * (Math.random() < 0.5 ? -1 : 1);
+  FL.age[i] = 0; FL.life[i] = 3.2 + Math.random() * 2.4;
+  FL.size[i] = (0.03 + Math.random() * Math.random() * 0.085) * R * 1.8;
+  const cols = FLAKE_COLS[look];
+  flakes.setColorAt(i, _c.set(cols[Math.floor(Math.random() * cols.length)]));
+  flakes.instanceColor.needsUpdate = true;
+};
+// chips lying on the plate travel with the stone they landed on
+let lastSpinF = 0;
+const updateFlakes = (dt) => {
+  let dSpin = uSpin.value - lastSpinF; lastSpinF = uSpin.value;
+  if (Math.abs(dSpin) > 3) dSpin = 0;
+  let alive = 0;
+  for (let i = 0; i < FLAKES; i++) {
+    if (FL.age[i] > FL.life[i]) continue;
+    FL.age[i] += dt;
+    const k = i * 3;
+    if (FL.age[i] > FL.life[i]) { flakes.setMatrixAt(i, ZERO); alive++; continue; }
+    const fade = Math.min(1, (FL.life[i] - FL.age[i]) / 0.5);
+    const floorY = plateTop(FL.pos[k], FL.pos[k + 2]) + 0.002;
+    if (FL.pos[k + 1] <= floorY && FL.vel[k + 1] <= 0) {
+      FL.pos[k + 1] = floorY;
+      FL.vel[k] = FL.vel[k + 1] = FL.vel[k + 2] = 0;
+      const rN = Math.floor(Math.hypot(FL.pos[k], FL.pos[k + 2]) * 6);
+      const da = -(rN === 10 || rN === 12 ? Math.sign(11 - rN) * dSpin : dt / 16);
+      const c = Math.cos(da), sN = Math.sin(da), x = FL.pos[k], z = FL.pos[k + 2];
+      FL.pos[k] = x * c - z * sN; FL.pos[k + 2] = x * sN + z * c;
+      FL.q[i].slerp(_q.setFromAxisAngle(_s.set(1, 0, 0), -Math.PI / 2), Math.min(dt * 10, 1));
+    } else {
+      FL.vel[k + 1] -= 1.4 * dt;
+      const drag = Math.exp(-1.4 * dt);
+      FL.vel[k] *= drag; FL.vel[k + 1] *= drag; FL.vel[k + 2] *= drag;
+      FL.vel[k] += Math.sin(FL.age[i] * 4 + i) * 0.08 * dt;
+      FL.pos[k] += FL.vel[k] * dt; FL.pos[k + 1] += FL.vel[k + 1] * dt; FL.pos[k + 2] += FL.vel[k + 2] * dt;
+      _s.set(FL.axis[k], FL.axis[k + 1], FL.axis[k + 2]);
+      FL.q[i].multiply(_q.setFromAxisAngle(_s, FL.spin[i] * dt * Math.min(FL.age[i] * 3, 1)));
+    }
+    const sz = FL.size[i] * fade;
+    _m.compose(_v.set(FL.pos[k], FL.pos[k + 1], FL.pos[k + 2]), FL.q[i], _s.set(sz, sz, sz));
+    flakes.setMatrixAt(i, _m);
+    alive++;
+  }
+  if (alive || FL.alive) flakes.instanceMatrix.needsUpdate = true;
+  FL.alive = alive;
+};
+
+////////////////////////////////////////////////////////////////
+//// PEEL
+////////////////////////////////////////////////////////////////
+
+const TR = { active: false, t: 0, dur: 1.7, from: LOOK0, to: LOOK0, cur: LOOK0, f: -0.15, order: null, sang: null };
+const F0 = -0.12, F1 = 1.12;
+const ease = (u) => u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+const lowerBound = (arr, x) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] < x) lo = mid + 1; else hi = mid; } return lo; };
+const _wq = new THREE.Quaternion();
+const startPeel = (to) => {
+  if (TR.active || to === TR.cur) return;
+  TR.from = TR.cur; TR.to = to;
+  // start somewhere on the side facing the camera
+  const d = camera.position.clone().normalize().add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.4, Math.random() - 0.5).multiplyScalar(1.1)).normalize();
+  uSpot.value.copy(d.applyQuaternion(ball.getWorldQuaternion(_wq).invert()));
+  const S = uSpot.value, ang = new Float32Array(POOL.n);
+  for (let i = 0; i < POOL.n; i++) {
+    const x = POOL.P[i * 3], y = POOL.P[i * 3 + 1], z = POOL.P[i * 3 + 2], l = Math.hypot(x, y, z) || 1;
+    ang[i] = Math.acos(Math.max(-1, Math.min(1, (x * S.x + y * S.y + z * S.z) / l))) / Math.PI;
+  }
+  const order = new Uint32Array(POOL.n).map((_, i) => i);
+  order.sort((a, b) => ang[a] - ang[b]);
+  TR.order = order; TR.sang = Float32Array.from(order, (i) => ang[i]);
+  uFrom.value = TR.from; uTo.value = TR.to;
+  TR.active = true; TR.t = 0; TR.f = F0;
+  snd.morph(to === 1 || to === 3 ? 1 : 0);
+};
+const updatePeel = (dt) => {
+  if (!TR.active) { prevM.copy(ball.matrixWorld); return; }
+  TR.t += dt;
+  const u = Math.min(TR.t / TR.dur, 1);
+  const f = F0 + (F1 - F0) * (0.6 * u + 0.4 * ease(u));
+  uProg.value = f;
+  const i0 = lowerBound(TR.sang, Math.max(TR.f, 0)), i1 = lowerBound(TR.sang, Math.max(f, 0));
+  const span = i1 - i0;
+  if (span > 0) {
+    let n = span / POOL.n * (LOWQ ? 700 : 1500), made = 0;
+    while (n > 0) { if (n >= 1 || Math.random() < n) { spawnFlake(TR.order[i0 + Math.floor(Math.random() * span)], TR.from, dt); made++; } n -= 1; }
+    snd.flake(made);
+  }
+  TR.f = f;
+  const bare = (k) => (k === 1 ? 1 : k === 2 ? 0.5 : 0);
+  uLook.value = bare(TR.from) + (bare(TR.to) - bare(TR.from)) * Math.min(Math.max((f - 0.05) / 0.9, 0), 1);
+  if (u >= 1) {
+    TR.active = false;
+    TR.cur = TR.to;
+    uFrom.value = TR.to; uTo.value = TR.to;
+    uProg.value = -1;
+    uLook.value = bare(TR.to);
+    snd.answer();
+  }
+  prevM.copy(ball.matrixWorld);
+};
+
+////////////////////////////////////////////////////////////////
+//// SOUND
+////////////////////////////////////////////////////////////////
+
+// struck-metal resonator: each part rings with its own inharmonic modes;
+// painted metal is damped and dull, bare oxidised metal rings long and bright.
+// dragging rubs the rim like a singing bowl.
+const MODES = [1, 2.32, 4.25, 6.63, 9.38, 13.1];
+const PART_F = [98.0, 233.08, 392.0, 293.66];
+const snd = (() => {
+  let ctx = null, out, wet, rubG, rubF, rubOsc = [], hum, grG, grF, on = true, ready = false, look = uLook.value;
+  const init = () => {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    out = ctx.createGain(); out.gain.value = on ? 0.85 : 0;
+    const comp = ctx.createDynamicsCompressor();
+    out.connect(comp).connect(ctx.destination);
+    const ir = ctx.createBuffer(2, ctx.sampleRate * 3.6, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3.6);
+    }
+    const conv = ctx.createConvolver(); conv.buffer = ir;
+    const wf = ctx.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 3800;
+    wet = ctx.createGain(); wet.gain.value = 0.45;
+    wet.connect(wf).connect(conv).connect(out);
+    // machine hum, after the reference: a 55 Hz electrical drone with its
+    // 110 Hz partial and a slightly flat 47.6 Hz voice beating against it
+    hum = ctx.createGain(); hum.gain.value = 0.0001;
+    const hf = ctx.createBiquadFilter(); hf.type = 'lowpass'; hf.frequency.value = 320;
+    hum.connect(hf).connect(out); hf.connect(wet);
+    [55.0, 110.0, 47.6].forEach((f, i) => {
+      const o = ctx.createOscillator(); o.type = i === 0 ? 'sawtooth' : 'sine'; o.frequency.value = f;
+      const g = ctx.createGain(); g.gain.value = [0.35, 0.3, 0.25][i];
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05 + i * 0.03;
+      const lg = ctx.createGain(); lg.gain.value = 0.15;
+      lfo.connect(lg).connect(g.gain);
+      o.connect(g).connect(hum); o.start(); lfo.start();
+    });
+    hum.gain.setTargetAtTime(0.07, ctx.currentTime, 2.5);
+    // rub: beating partial pair through a resonant band
+    rubF = ctx.createBiquadFilter(); rubF.type = 'bandpass'; rubF.Q.value = 6; rubF.frequency.value = 466;
+    rubG = ctx.createGain(); rubG.gain.value = 0.0001;
+    rubF.connect(rubG); rubG.connect(out); rubG.connect(wet);
+    [233.08, 234.4, 466.16, 540.8].forEach((f, i) => {
+      const o = ctx.createOscillator(); o.type = i < 2 ? 'sine' : 'triangle'; o.frequency.value = f;
+      const g = ctx.createGain(); g.gain.value = i < 2 ? 0.5 : 0.18;
+      o.connect(g).connect(rubF); o.start();
+      rubOsc.push(o);
+    });
+    // the turn, rebuilt in the machine's own voice:
+    // a stone weight (dark filtered noise), a servo whine whose pitch follows the
+    // spin, chopped by the countdown's 230 Hz grain, a sub swell, and a ratchet of
+    // clicks through the hunter's formants (scheduled in tick)
+    const gb = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
+    const gd = gb.getChannelData(0);
+    let br = 0;
+    for (let i = 0; i < gd.length; i++) { br = br * 0.99 + (Math.random() * 2 - 1) * 0.05; gd[i] = br * 3; }
+    const gs = ctx.createBufferSource(); gs.buffer = gb; gs.loop = true;
+    grF = ctx.createBiquadFilter(); grF.type = 'lowpass'; grF.frequency.value = 160; grF.Q.value = 2;
+    grG = ctx.createGain(); grG.gain.value = 0.0001;
+    const gp = ctx.createStereoPanner(); gp.pan.value = 0.2;
+    const stoneG = ctx.createGain(); stoneG.gain.value = 0.35;
+    gs.connect(grF).connect(stoneG).connect(grG); gs.start();
+    grG.connect(gp); gp.connect(out); gp.connect(wet);
+    // servo whine: detuned saws through a narrow moving band, ring-chopped
+    TURN.sv = [0, 1].map((i) => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 110; o.detune.value = i ? 14 : -14; o.start(); return o; });
+    TURN.svF = ctx.createBiquadFilter(); TURN.svF.type = 'bandpass'; TURN.svF.Q.value = 11; TURN.svF.frequency.value = 600;
+    const chop = ctx.createGain(); chop.gain.value = 0.5;
+    const cl = ctx.createOscillator(); cl.type = 'square'; cl.frequency.value = 230;
+    const clg = ctx.createGain(); clg.gain.value = 0.5; cl.connect(clg).connect(chop.gain); cl.start();
+    TURN.chopO = cl;
+    const svG = ctx.createGain(); svG.gain.value = 0.55;
+    TURN.sv.forEach((o) => o.connect(TURN.svF));
+    TURN.svF.connect(chop).connect(svG).connect(grG);
+    // sub swell
+    TURN.sub = ctx.createOscillator(); TURN.sub.type = 'sine'; TURN.sub.frequency.value = 41.2; TURN.sub.start();
+    const subG = ctx.createGain(); subG.gain.value = 0.9;
+    TURN.sub.connect(subG).connect(grG);
+    // ratchet formant bank (the hunter's vocal tract, an octave-ish lower = metal teeth)
+    TURN.rb = ctx.createGain(); TURN.rb.gain.value = 1;
+    [[760, 7, 1.0], [1180, 8, 0.8], [1880, 9, 0.5], [2800, 10, 0.3]].forEach(([f, q, a2]) => {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+      const g = ctx.createGain(); g.gain.value = a2;
+      TURN.rb.connect(bp).connect(g).connect(gp);
+    });
+    ready = true;
+  };
+  const chat = { next: 3, busy: false };
+  // a burst of resonant clicks and a short trill, like the alien chatter in the reference
+  const chatter = () => {
+    const t0 = ctx.currentTime + 0.02;
+    const n = 6 + Math.floor(Math.random() * 14);
+    const bands = [1800, 2600, 3800, 4500];
+    const pn = ctx.createStereoPanner(); pn.pan.value = Math.random() * 1.4 - 0.7;
+    const g = ctx.createGain(); g.gain.value = 0.05;
+    g.connect(pn); pn.connect(out); pn.connect(wet);
+    let t = t0;
+    for (let i = 0; i < n; i++) {
+      const trill = Math.random() < 0.2;
+      const reps = trill ? 6 : 1;
+      const f = bands[Math.floor(Math.random() * bands.length)] * (0.95 + Math.random() * 0.1);
+      for (let r = 0; r < reps; r++) {
+        const s = noise(0.004);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 9;
+        const cg = ctx.createGain(); cg.gain.value = 0.6 + Math.random() * 0.8;
+        s.connect(bp).connect(cg).connect(g);
+        s.start(t + r * 0.025);
+      }
+      t += trill ? 0.18 : 0.03 + Math.random() * 0.07;
+    }
+  };
+  // the hunter's call, rebuilt from the second reference: two dry clicks, a
+  // pause, then a click-purr at ~15.5 clicks a second through vocal-tract
+  // formants near 1.2, 1.9, 3.0 and 4.5 kHz, slowing to a stop at the end
+  const pred = { next: 2 + Math.random() * 2, last: -99 };
+  const TURN = { next: 0 };
+  // one call, shaped by: level, pan, distance (0 near … 1 far: quieter, darker,
+  // wetter), pitch, and form: 'full' (clicks, pause, purr), 'purr' (a short purr
+  // only) or 'clicks' (a few dry clicks)
+  const predCall = ({ level = 1, pan = 0, dist = 0, pitch = 1, form = 'full' } = {}) => {
+    const t0 = ctx.currentTime + 0.03;
+    const pn = ctx.createStereoPanner(); pn.pan.value = pan;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 9000 - dist * 6500;
+    const master = ctx.createGain(); master.gain.value = 0.62 * level * (1 - dist * 0.65);
+    const send = ctx.createGain(); send.gain.value = 0.6 + dist * 1.2;
+    master.connect(lp).connect(pn); pn.connect(out); pn.connect(send).connect(wet);
+    const bus = ctx.createGain(); bus.gain.value = 1;
+    const p0 = form === 'full' ? 1.6 : 0.0;
+    [[1234, 7, 1.0], [1900, 8, 0.8], [3026, 9, 0.55], [4500, 10, 0.3]].forEach(([f, q, a2], i) => {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * pitch; bp.Q.value = q;
+      if (i === 0 && form !== 'clicks') { bp.frequency.setValueAtTime(900 * pitch, t0 + p0); bp.frequency.linearRampToValueAtTime(1234 * pitch, t0 + p0 + 0.7); }
+      const g = ctx.createGain(); g.gain.value = a2;
+      bus.connect(bp).connect(g).connect(master);
+    });
+    const click = (t, a2) => {
+      const s2 = noise(0.003);
+      const g = ctx.createGain(); g.gain.value = a2;
+      s2.connect(g).connect(bus); s2.start(t);
+    };
+    if (form === 'clicks') {
+      // a few dry clicks, sometimes a quick pair
+      let t = t0;
+      const n = 2 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) { click(t, 1.1 + Math.random() * 0.4); t += Math.random() < 0.4 ? 0.053 : 0.15 + Math.random() * 0.5; }
+      return t - t0 + 0.3;
+    }
+    if (form === 'full') { click(t0, 1.4); click(t0 + 0.053, 1.0); }
+    // the purr: clicks every ~64 ms, a little jitter, slowing over the last beats
+    const rate = 1 / (0.064 / pitch);
+    let t = t0 + p0;
+    const end = t0 + p0 + (form === 'full' ? 2.4 + Math.random() * 0.6 : 0.6 + Math.random() * 1.0);
+    while (t < end) { click(t, 0.9 + Math.random() * 0.5); t += (0.058 + Math.random() * 0.012) / pitch; }
+    [0.24, 0.14, 0.14, 0.21].slice(0, form === 'full' ? 4 : 2).forEach((d) => { t += d; click(t, 0.7); });
+    // voiced body under the clicks, gated by the click rate
+    const v = ctx.createOscillator(); v.type = 'sawtooth';
+    v.frequency.setValueAtTime(330 * pitch, t0 + p0); v.frequency.linearRampToValueAtTime(390 * pitch, t0 + p0 + 0.7);
+    const gate = ctx.createGain(); gate.gain.value = 0.0;
+    const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = rate;
+    const lg = ctx.createGain(); lg.gain.value = 0.5;
+    lfo.connect(lg).connect(gate.gain);
+    const venv = ctx.createGain();
+    venv.gain.setValueAtTime(0.0001, t0 + p0);
+    venv.gain.exponentialRampToValueAtTime(0.09, t0 + p0 + 0.3);
+    venv.gain.setValueAtTime(0.09, Math.max(t0 + p0 + 0.3, end - 0.6));
+    venv.gain.exponentialRampToValueAtTime(0.0001, end + 0.3);
+    v.connect(gate).connect(venv).connect(bus);
+    v.start(t0 + p0); lfo.start(t0 + p0); v.stop(end + 0.4); lfo.stop(end + 0.4);
+    return t - t0 + 0.4;
+  };
+  // ambience: the hunter is close and clearly heard; mostly the full call or
+  // its purr, only a little variation so it stays recognisable
+  const pickForm = () => { const r = Math.random(); return r < 0.5 ? 'full' : r < 0.9 ? 'purr' : 'clicks'; };
+  const FORM_LEN = { full: 4.6, purr: 2.0, clicks: 1.0 };
+  const ambientCall = (form = pickForm()) => {
+    return predCall({
+      form,
+      level: 0.95 + Math.random() * 0.25,
+      pan: Math.random() * 1.4 - 0.7,
+      dist: Math.random() * 0.35,
+      pitch: 0.95 + Math.random() * 0.1,
+    });
+  };
+  const noise = (dur) => {
+    const b = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 6);
+    const s = ctx.createBufferSource(); s.buffer = b; return s;
+  };
+  return {
+    get on() { return on; },
+    wake() {
+      if (!ctx) init();
+      if (ctx.state === 'suspended') ctx.resume();
+    },
+    set(v) { on = v; if (ctx) out.gain.setTargetAtTime(on ? 0.85 : 0, ctx.currentTime, 0.08); },
+    look(v) { look = v; },
+    strike(kind, pan) {
+      if (!ready || !on) return;
+      const t = ctx.currentTime + 0.005;
+      const f0 = PART_F[kind] * (1 + (Math.random() - 0.5) * 0.012);
+      const bare = uLook.value;
+      const p = ctx.createStereoPanner(); p.pan.value = pan;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(bare > 0.5 ? 9000 : 3200, t);
+      lp.frequency.exponentialRampToValueAtTime(bare > 0.5 ? 2400 : 700, t + 1.2);
+      const g = ctx.createGain(); g.gain.value = 0.85;
+      g.connect(lp).connect(p); p.connect(out); p.connect(wet);
+      // body thump: a sine dropping from 120 to 38 Hz
+      const th = ctx.createOscillator(); th.type = 'sine';
+      th.frequency.setValueAtTime(120, t); th.frequency.exponentialRampToValueAtTime(38, t + 0.22);
+      const thg = ctx.createGain();
+      thg.gain.setValueAtTime(0.0001, t); thg.gain.exponentialRampToValueAtTime(0.9, t + 0.004); thg.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      th.connect(thg).connect(p); th.start(t); th.stop(t + 0.5);
+      // crack: a hard broadband transient
+      const cr = noise(0.035);
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1400;
+      const crg = ctx.createGain(); crg.gain.value = 0.7;
+      cr.connect(hp).connect(crg).connect(p); cr.start(t);
+      MODES.forEach((m, i) => {
+        const o = ctx.createOscillator(); o.type = 'sine';
+        o.frequency.value = f0 * m * (1 + (Math.random() - 0.5) * 0.004 * i);
+        const e = ctx.createGain();
+        const dec = (bare > 0.5 ? 4.2 : 1.3) * (kind === 0 ? 1.4 : 1) / (1 + i * (bare > 0.5 ? 0.45 : 0.9));
+        const amp = 0.32 / (1 + i * 0.7) * (bare > 0.5 ? 1 : i === 0 ? 1.3 : 0.7);
+        e.gain.setValueAtTime(0.0001, t);
+        e.gain.exponentialRampToValueAtTime(amp, t + 0.002);
+        e.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+        o.connect(e).connect(g);
+        o.start(t); o.stop(t + dec + 0.05);
+      });
+      // the contact itself: short filtered tick
+      const n = noise(0.06);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f0 * (bare > 0.5 ? 9 : 4); bp.Q.value = 1.4;
+      const ng = ctx.createGain(); ng.gain.value = bare > 0.5 ? 0.35 : 0.6;
+      n.connect(bp).connect(ng).connect(p);
+      n.start(t);
+    },
+    // the skin changes: a glassy sweep up into patina, down back into paint
+    // the skin changes: a formant-shaped servo glide, up into patina, down into paint
+    morph(toPatina) {
+      if (!ready || !on) return;
+      const t = ctx.currentTime + 0.02;
+      const f0 = toPatina ? 70 : 140, f1 = toPatina ? 140 : 70;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.14, t + 0.25);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+      g.connect(out); g.connect(wet);
+      const chop = ctx.createGain(); chop.gain.value = 0.5;
+      const cl = ctx.createOscillator(); cl.type = 'square'; cl.frequency.setValueAtTime(toPatina ? 180 : 300, t); cl.frequency.exponentialRampToValueAtTime(toPatina ? 300 : 180, t + 1.6);
+      const clg = ctx.createGain(); clg.gain.value = 0.5; cl.connect(clg).connect(chop.gain);
+      chop.connect(g);
+      [[1234, 1900], [1900, 3026]].forEach(([fa, fb], i) => {
+        const o = ctx.createOscillator(); o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f0 * (i ? 1.5 : 1), t); o.frequency.exponentialRampToValueAtTime(f1 * (i ? 1.5 : 1), t + 1.6);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7;
+        bp.frequency.setValueAtTime(toPatina ? fa : fb, t); bp.frequency.exponentialRampToValueAtTime(toPatina ? fb : fa, t + 1.6);
+        const pn = ctx.createStereoPanner(); pn.pan.value = (i ? 0.5 : -0.5) * (toPatina ? 1 : -1);
+        o.connect(bp).connect(pn).connect(chop);
+        o.start(t); o.stop(t + 2.3);
+      });
+      cl.start(t); cl.stop(t + 2.3);
+    },
+    // dry crackle of paint chips letting go
+    flake(n) {
+      if (!ready || !on || n <= 0) return;
+      const k = Math.min(3, Math.ceil(n / 6));
+      for (let j = 0; j < k; j++) {
+        const t = ctx.currentTime + Math.random() * 0.03;
+        const s = noise(0.012 + Math.random() * 0.02);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2500 + Math.random() * 5000; bp.Q.value = 2;
+        const g = ctx.createGain(); g.gain.value = 0.05 + Math.random() * 0.06;
+        const pn = ctx.createStereoPanner(); pn.pan.value = Math.random() * 1.4 - 0.7;
+        s.connect(bp).connect(g).connect(pn); pn.connect(out); pn.connect(wet);
+        s.start(t);
+      }
+    },
+    // countdown tick: two whistling tones near 3.8 and 4.5 kHz, buzzed by a
+    // 230 Hz square (the reference's 4.35 ms grain), climbing a little each tick
+    cdTick(k, n) {
+      if (!ready || !on) return;
+      const t = ctx.currentTime + 0.005;
+      const p = k / Math.max(1, n - 1);
+      const up = 1 + 0.012 * k + p * p * 0.06;
+      const dur = 0.2 - p * 0.11;
+      const am = ctx.createGain(); am.gain.value = 0.5;
+      const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 230 * (1 + p * 0.3);
+      const lg = ctx.createGain(); lg.gain.value = 0.5;
+      lfo.connect(lg).connect(am.gain);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(0.07 + p * 0.03, t + 0.004);
+      env.gain.setValueAtTime(0.07 + p * 0.03, t + dur * 0.6);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      const pn = ctx.createStereoPanner(); pn.pan.value = 0.25;
+      am.connect(env).connect(pn); pn.connect(out); pn.connect(wet);
+      [[4480, 1], [3790, 0.7], [2240, 0.25]].forEach(([f, a]) => {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * up;
+        const g = ctx.createGain(); g.gain.value = a;
+        o.connect(g).connect(am); o.start(t); o.stop(t + dur + 0.02);
+      });
+      lfo.start(t); lfo.stop(t + dur + 0.02);
+      // the hard click that opens each tick, plus the two little after-ticks early on
+      const clicks = k < 5 ? [0, 0.13, 0.21] : [0];
+      clicks.forEach((dt0, j) => {
+        const s = noise(0.006);
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = j ? 4500 : 2600; bp.Q.value = 3;
+        const g = ctx.createGain(); g.gain.value = j ? 0.18 : 0.35;
+        s.connect(bp).connect(g).connect(pn);
+        s.start(t + dt0);
+      });
+    },
+    // after a peel, sometimes the hunter answers
+    answer() {
+      if (!ready || !on) return;
+      const now = ctx.currentTime;
+
+    },
+    call() { if (ready) predCall({}); },
+    amb() { if (ready) for (let i = 0; i < 6; i++) ambientCall(); },
+    tick(dt) {
+      if (!ready) return;
+      const now = ctx.currentTime;
+      // the hum cuts out for the breath before the spin, like the reference's final silence
+      const cut = CD.live && CD.s > SCENE - 0.18 ? 0.0001 : 0.07;
+      hum.gain.setTargetAtTime(on ? cut : 0.0001, now, cut < 0.01 ? 0.015 : 0.25);
+      // the hunter comes back 3 to 6 seconds after its last call has ended.
+      // it mostly keeps clear of the countdown and the spin: a call that would
+      // run into them usually waits a moment (about one time in four it doesn't)
+      if (on && now > pred.next) {
+        const form = pickForm();
+        const busy = CD.live && (CD.s + FORM_LEN[form] > SCENE - 2.9 || CD.s < 1.2);
+        if (busy && Math.random() < 0.75) {
+          // wait until the spin is over, then come in a little after it
+          pred.next = now + (CD.s < 1.2 ? 1.2 - CD.s : SCENE - CD.s + 1.2) + Math.random() * 1.5;
+        } else {
+          const len = ambientCall(form);
+          pred.last = now;
+          pred.next = now + len + 3 + Math.random() * 3;
+          chat.next = Math.max(chat.next, now + 3);
+        }
+      }
+      // alien chatter now and then: clusters of resonant clicks
+      if (on && !chat.busy && now > chat.next) { chatter(); chat.next = now + 5 + Math.random() * 9; }
+      const gv = on ? Math.min(1, spinVel / 4.5) : 0;
+      grG.gain.setTargetAtTime(Math.max(0.0001, gv * gv * 0.22), now, 0.06);
+      grF.frequency.setTargetAtTime(80 + gv * 140, now, 0.1);
+      const wf = 55 * Math.pow(2, gv * 2.2);
+      TURN.sv.forEach((o) => o.frequency.setTargetAtTime(wf, now, 0.08));
+      TURN.svF.frequency.setTargetAtTime(380 + gv * 1500, now, 0.08);
+      TURN.chopO.frequency.setTargetAtTime(150 + gv * 160, now, 0.1);
+      TURN.sub.frequency.setTargetAtTime(41.2 + gv * 14, now, 0.2);
+      // ratchet: tooth clicks speed up with the spin, from 6 to 38 a second
+      if (gv > 0.05) {
+        const rate = 6 + gv * 32;
+        if (TURN.next < now) TURN.next = now;
+        while (TURN.next < now + 0.1) {
+          const s = noise(0.003);
+          const g = ctx.createGain(); g.gain.value = (0.25 + Math.random() * 0.25) * gv;
+          s.connect(g).connect(TURN.rb); s.start(TURN.next);
+          TURN.next += (1 / rate) * (0.85 + Math.random() * 0.3);
+        }
+      }
+      const target = on ? Math.pow(spin.rub, 1.4) * (uLook.value > 0.5 ? 0.11 : 0.05) : 0;
+      rubG.gain.setTargetAtTime(Math.max(0.0001, target), now, 0.12);
+      rubF.frequency.setTargetAtTime(380 + spin.rub * 300 + uLook.value * 180, now, 0.2);
+    },
+  };
+})();
+
+////////////////////////////////////////////////////////////////
+//// TOGGLE
+////////////////////////////////////////////////////////////////
+
+const lookBtns = [...document.querySelectorAll('button[data-look]')];
+const syncLook = () => lookBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.look === lookMode)));
+lookBtns.forEach((b) => b.addEventListener('click', () => { lookMode = b.dataset.look; syncLook(); }));
+let wearT = uWear.value;
+const wearBtns = [...document.querySelectorAll('button[data-wear]')];
+const syncWear = () => wearBtns.forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.wear === 'heavy') === (wearT > 0.5))));
+wearBtns.forEach((b) => b.addEventListener('click', () => { wearT = b.dataset.wear === 'heavy' ? 0.75 : 0.25; syncWear(); }));
+const moveBtns = [...document.querySelectorAll('button[data-move]')];
+const syncMove = () => moveBtns.forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.move === 'flip') === moving)));
+moveBtns.forEach((b) => b.addEventListener('click', () => { moving = b.dataset.move === 'flip'; syncMove(); }));
+const sndBtn = document.querySelector('[data-snd]');
+sndBtn.addEventListener('click', () => {
+  snd.wake();
+  snd.set(!snd.on);
+  sndBtn.setAttribute('aria-pressed', String(snd.on));
+  sndBtn.textContent = snd.on ? 'Sound on' : 'Sound off';
+});
+document.getElementById('picker').addEventListener('pointerdown', () => snd.wake());
+syncLook(); syncWear(); syncMove();
+
+////////////////////////////////////////////////////////////////
+//// LOOP
+////////////////////////////////////////////////////////////////
+
+let vw = window.innerWidth, vh = window.innerHeight;
+// dragging orbits the whole room around the vertical axis through the ball
+const OFF0 = CAM0.clone().sub(LOOK);
+// a bit further out than the shader's camera
+const RAD = OFF0.length() * 1.35, EL0 = Math.asin(OFF0.y / RAD), AZ0 = Math.atan2(OFF0.x, OFF0.z);
+let camK = 1;
+if (QS.has('yaw')) spin.yaw = parseFloat(QS.get('yaw'));
+const placeCam = () => {
+  spin.pitch = Math.max(-0.35, Math.min(QS.has('top') ? 1.4 : 0.55, spin.pitch));
+  if (QS.has('top')) spin.pitch = 1.0;
+  const el = EL0 + spin.pitch, az = AZ0 - spin.yaw, r = RAD * camK;
+  camera.position.set(LOOK.x + Math.sin(az) * Math.cos(el) * r, LOOK.y + Math.sin(el) * r, LOOK.z + Math.cos(az) * Math.cos(el) * r);
+  camera.lookAt(LOOK);
+  if (typeof KICK !== 'undefined' && KICK.shake > 0.01) camera.position.add(_sh.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.028 * KICK.shake));
+};
+const _sh = new THREE.Vector3();
+const fit = () => {
+  vw = window.innerWidth; vh = window.innerHeight;
+  camera.aspect = vw / vh;
+  // keep the shader's framing; back off a little on tall screens
+  camK = Math.max(1, 0.9 / camera.aspect);
+  placeCam();
+  camera.updateProjectionMatrix();
+  renderer.setSize(vw, vh);
+  uRes.value.set(vw, vh);
+};
+window.addEventListener('resize', fit);
+fit();
+
+const clock = new THREE.Timer();
+let first = true, tt = 0;
+renderer.setAnimationLoop(() => {
+  clock.update();
+  const dt = QS.has('freeze') ? 0 : Math.min(clock.getDelta(), 0.05);
+  tt += dt;
+  uTime.value = tt + (parseFloat(QS.get('t')) || 0);
+  uWear.value += (wearT - uWear.value) * Math.min(1, dt * 2);
+  coast(dt);
+  animate(dt);
+  updateKick(dt);
+  placeCam();
+  ball.updateMatrixWorld();
+  if (QS.has('prog') && !window.__pp) { window.__pp = 1; lookMode = QS.get('to') || 'patina'; startPeel(LOOKS[lookMode]); TR.t = parseFloat(QS.get('prog')) * TR.dur; updatePeel(0.016); for (let j = 0; j < 40; j++) updateFlakes(0.03); }
+  updatePeel(dt);
+  updateFlakes(dt);
+  updateHits(dt);
+  snd.tick(dt);
+  camera.updateMatrixWorld();
+  uCamPos.value.copy(camera.position);
+  uInvProj.value.copy(camera.projectionMatrixInverse);
+  uCamWorld.value.copy(camera.matrixWorld);
+  uNear.value = camera.near; uFar.value = camera.far;
+  pipe.render();
+  if (first) { first = false; document.getElementById('loading').classList.add('off'); window.__ready = true; }
+});
+window.__snd = snd;
+window.__strike = strike;

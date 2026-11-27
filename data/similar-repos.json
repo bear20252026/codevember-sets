@@ -1,0 +1,167 @@
+{
+  "checked_at": "2026-11-27",
+  "criterion": "未做满 30 天，且 GitHub 体积 < 1 GB",
+  "repos": [
+    {
+      "name": "Spite",
+      "author": "@spite",
+      "days": "26 / 30",
+      "size": "85.3 MB",
+      "size_kb": 87347,
+      "license": "MIT",
+      "repo": "https://github.com/spite/codevember-2026",
+      "live": "https://spite.github.io/codevember-2026/",
+      "note": "PBR、软阴影、GI、AgX，26 个日目录。"
+    },
+    {
+      "name": "Adam Chernick",
+      "author": "@acher249",
+      "days": "26 / 30",
+      "size": "771.2 MB",
+      "size_kb": 789745,
+      "license": "MIT",
+      "repo": "https://github.com/acher249/codevember-2026",
+      "live": "https://adamwebsite.com/codevember/",
+      "note": "当前体积最大的一套，仍低于 1 GB；WebGPU 交互场景。"
+    },
+    {
+      "name": "Das Prinzip",
+      "author": "Frank Reitberger",
+      "days": "22 / 30",
+      "size": "51 MB",
+      "size_kb": 52224,
+      "license": "无",
+      "repo": "https://dasprinzip.com/codevember2026/",
+      "live": "https://dasprinzip.com/codevember2026/26-anamorph.html",
+      "note": "单文件 HTML，22 页；01/03/04/05 缺失，无公开仓库。"
+    },
+    {
+      "name": "AquaNeon",
+      "author": "@aquaNeon",
+      "days": "25 / 30",
+      "size": "4.3 MB",
+      "size_kb": 4364,
+      "license": "无",
+      "repo": "https://github.com/aquaNeon/codevember-2026",
+      "live": "https://codevember.vercel.app",
+      "note": "25 个编号目录，体积很小；适合并入合集。"
+    },
+    {
+      "name": "Drschizzo",
+      "author": "@drschizzo",
+      "days": "27 / 30",
+      "size": "64.1 MB",
+      "size_kb": 65605,
+      "license": "无",
+      "repo": "https://github.com/drschizzo/Codevember",
+      "live": "https://drschizzo.github.io/Codevember/",
+      "note": "27 个主题目录；缺 Orrery、Portal、Dissolve。"
+    },
+    {
+      "name": "Akella",
+      "author": "@akella",
+      "days": "20 / 30",
+      "size": "124.5 MB",
+      "size_kb": 127513,
+      "license": "无",
+      "repo": "https://github.com/akella/codevember-2026",
+      "live": "https://akella.github.io/codevember-2026/",
+      "note": "20 个独立 Vite 项目，构建产物不入库。"
+    },
+    {
+      "name": "Theo Tillberg",
+      "author": "@theo_t",
+      "days": "18 / 30",
+      "size": "302.3 MB",
+      "size_kb": 309596,
+      "license": "MIT",
+      "repo": "https://github.com/ttillberg/codevember-2026",
+      "live": "https://ttillberg.github.io/codevember-2026/",
+      "note": "18 个有内容的日期目录；已在本仓库的 theo/ 内。"
+    },
+    {
+      "name": "Mr.doob",
+      "author": "@mrdoob",
+      "days": "18 / 30",
+      "size": "11.9 MB",
+      "size_kb": 12233,
+      "license": "MIT",
+      "repo": "https://github.com/mrdoob/codevember-2026",
+      "live": "https://mrdoob.github.io/codevember-2026/",
+      "note": "18 个日目录，画廊列出全部 30 个提示。"
+    },
+    {
+      "name": "Greg Puzzles",
+      "author": "@gregpuzzles1",
+      "days": "13 / 30",
+      "size": "126.8 MB",
+      "size_kb": 129793,
+      "license": "MIT",
+      "repo": "https://github.com/gregpuzzles1/codevember-2026",
+      "live": "https://gregpuzzles1.github.io/codevember-2026/",
+      "note": "13 个日目录，部分日期含大体积游戏资产。"
+    },
+    {
+      "name": "Aishwary Gupta",
+      "author": "@Aishwary2004Gupta",
+      "days": "4 / 30",
+      "size": "27.2 MB",
+      "size_kb": 27839,
+      "license": "无",
+      "repo": "https://github.com/Aishwary2004Gupta/codevember-2026",
+      "live": "",
+      "note": "01、02、12、18 四页，单文件 HTML。"
+    },
+    {
+      "name": "Niyati82",
+      "author": "@Niyati82",
+      "days": "3 / 30",
+      "size": "17.5 MB",
+      "size_kb": 17892,
+      "license": "无",
+      "repo": "https://github.com/Niyati82/codevember-2026",
+      "live": "",
+      "note": "13、14、15 三天，独立 Vite 工程。"
+    },
+    {
+      "name": "Eric Levin",
+      "author": "@ericrius1",
+      "days": "2 / 30",
+      "size": "22.6 MB",
+      "size_kb": 23166,
+      "license": "无",
+      "repo": "https://github.com/ericrius1/codevember",
+      "live": "https://www.ericlevin.dev/codevember/",
+      "note": "04、09 两页，纯 WebGPU / weft。"
+    }
+  ],
+  "extras": [
+    {
+      "name": "Keaukraine",
+      "days": "0 实际内容 / 30 占位",
+      "size": "2.2 MB",
+      "size_kb": 2277,
+      "license": "无",
+      "repo": "https://github.com/keaukraine/codevember-2026",
+      "note": "30 个目录全是 “Nothing here” 占位，属于“没装满”的反例。"
+    },
+    {
+      "name": "bear/codevember-sets（本仓库）",
+      "days": "2 套合集",
+      "size": "156.4 MB（GitHub 体积）",
+      "size_kb": 160190,
+      "license": "Spite/Theo MIT；Das 无",
+      "repo": "https://github.com/bear20252026/codevember-sets",
+      "note": "Spite 25 + Theo 16 的合集；本轮加入 Das Prinzip 22 页。"
+    },
+    {
+      "name": "zhulin025/codevember-archive",
+      "days": "目录索引",
+      "size": "0.9 MB",
+      "size_kb": 935,
+      "license": "无",
+      "repo": "https://github.com/zhulin025/codevember-archive",
+      "note": "社区作品目录/采集器，不是代码合集。"
+    }
+  ]
+}

@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cocoon.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --space:#3e3864;
+  --ink:#eef1f3;
+  --ink-soft:rgba(238,241,243,.62);
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%}
+body{margin:0;overflow:hidden;color:var(--ink);background:var(--space)}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:none;cursor:grab}
+canvas:active{cursor:grabbing}
+#title-block{position:fixed;top:calc(28px + env(safe-area-inset-top,0px));left:max(28px,env(safe-area-inset-left,0px));z-index:200;pointer-events:none;display:flex;flex-direction:column;gap:16px;text-shadow:none}
+#title-eyebrow{font:700 14px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+#title-headline{font:500 24px/1 var(--mono);letter-spacing:.02em;white-space:nowrap}
+#title-headline sup{font-size:.38em;vertical-align:super;line-height:0;margin-left:6px;letter-spacing:.06em}
+#title-headline .day{font-size:.55em;vertical-align:baseline;margin-right:.75em;letter-spacing:.04em}
+#title-block p{font:400 9px/1.5 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);margin:0}
+@media (max-width:968px){#title-eyebrow{font-size:12px}#title-headline{font-size:20px}}
+.grain{position:fixed;inset:0;z-index:100;pointer-events:none;opacity:.1;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.tag{position:fixed;z-index:150;left:0;right:0;bottom:calc(18px + env(safe-area-inset-bottom,0px));text-align:center;font:400 11px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);pointer-events:none}
+.loading{position:fixed;z-index:150;inset:0;display:grid;place-items:center;font:400 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);pointer-events:none;transition:opacity .8s}
+.loading.off{opacity:0}
+.picker{position:fixed;z-index:150;left:0;right:0;bottom:calc(44px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;justify-content:center;gap:8px 16px;padding:0 12px;pointer-events:none}
+.picker .grp{display:flex;gap:4px}
+.picker button{pointer-events:auto;font:400 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:rgba(128,128,128,.14);border:1px solid var(--ink-soft);border-radius:999px;padding:7px 12px;cursor:pointer;transition:background .2s,color .2s;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.picker button:hover{background:rgba(128,128,128,.26)}
+.picker button[aria-pressed="true"]{background:var(--ink);color:var(--space);border-color:var(--ink)}
+.picker button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.err{position:fixed;inset:0;display:none;place-items:center;z-index:300;font:400 12px/1.6 var(--mono);letter-spacing:.06em;text-align:center;padding:24px;color:var(--ink)}
+</style>
+<script type="importmap">
+{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js",
+ "three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js",
+ "three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="title-block">
+  <span id="title-eyebrow">Codevember 2026</span>
+  <span id="title-headline"><span class="day">Day20</span>Cocoon</span>
+  <p>WebGPU · three.js · TSL</p>
+</div>
+<div class="grain"></div>
+<div class="loading" id="loading">incubating…</div>
+<div class="err" id="err"></div>
+<nav class="picker" id="picker" aria-label="Scene">
+  <div class="grp"><button type="button" data-snd aria-pressed="true">Sound on</button></div>
+</nav>
+<div class="tag">Drag to orbit · scroll or pinch to zoom · tap to sprout spikes</div>
+
+<script type="module">
+////////////////////////////////////////////////////////////////////////////////
+// Codevember 2026 · Day20 Cocoon
+// Translucent egg-cocoon: iridescent membrane with branching veins, a glowing
+// yellow-green yolk volume full of drifting specks, and a granular red embryo.
+// three.js WebGPU + TSL, single fullscreen raymarch + bloom. Generative sound.
+////////////////////////////////////////////////////////////////////////////////
+import * as THREE from 'three/webgpu';
+import {
+  Fn, vec2, vec3, vec4, float, uniform, screenUV, screenSize, Loop, If,
+  mix, smoothstep, clamp, dot, normalize, length, exp, pow, sin, cos, fract,
+  floor, max, min, abs, sqrt, reflect, acos, step, select, pass, Break, dFdx, dFdy, cross, sign, uniformArray,
+  mx_noise_float, mx_noise_vec3, mx_fractal_noise_float, mx_worley_noise_vec2
+} from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
+
+const Q = new URLSearchParams(location.search);
+const FORCE_GL = Q.has('webgl');
+const SCALE = parseFloat(Q.get('scale') || '0') || 0;
+const FIXED_T = Q.has('t') ? parseFloat(Q.get('t')) : null;
+const MAX_FRAMES = parseInt(Q.get('frames') || '0');
+let frameCount = 0, shown = 0;
+
+////////////////////////////////////////////////////////////////////////////////
+// uniforms
+////////////////////////////////////////////////////////////////////////////////
+const uTime   = uniform(0);
+const uYaw    = uniform(0);
+const uPitch  = uniform(0);
+const uPulse  = uniform(0);                       // heartbeat envelope 0..1
+const uRipple = uniform(new THREE.Vector4(0, 0, 1, 99)); // xyz dir on sphere, w age
+const uTwitch = uniform(new THREE.Vector3());
+const uZoom = uniform(1.0);   // camera distance factor: 1 = default, smaller = closer (never further out)
+// loop bounds as uniforms: real loops instead of fully unrolled code -> much faster shader compile
+const uOne = uniform(1, 'int'), uSeg = uniform(15, 'int'), uSpk = uniform(24, 'int');
+const uTr16 = uniform(16, 'int'), uTr12 = uniform(12, 'int'), uTr8 = uniform(8, 'int'), uShell = uniform(10, 'int');
+// glass worm centreline (object space): xyz + radius, head first
+const WN = 16;
+const wormPts = Array.from({ length: WN }, () => new THREE.Vector4(0, 0, 0, 0.05));
+const uWorm = uniformArray(wormPts, 'vec4');
+// tap spikes (virus-like): stalk base + radius, head centre + radius, extra (colour id, glow)
+const NSP = 24;
+const spA = Array.from({ length: NSP }, () => new THREE.Vector4(0, 0, 0, 0));
+const spB = Array.from({ length: NSP }, () => new THREE.Vector4(0, 0, 0, 0));
+const spC = Array.from({ length: NSP }, () => new THREE.Vector4(0, 0, 0, 0));
+const uSpA = uniformArray(spA, 'vec4'), uSpB = uniformArray(spB, 'vec4'), uSpC = uniformArray(spC, 'vec4');
+
+////////////////////////////////////////////////////////////////////////////////
+// helpers
+////////////////////////////////////////////////////////////////////////////////
+const sphHit = Fn(([ro, rd, c, r]) => {
+  const oc = ro.sub(c);
+  const b = dot(oc, rd);
+  const h = b.mul(b).sub(dot(oc, oc).sub(r.mul(r)));
+  const res = vec2(-1.0, -1.0).toVar();
+  If(h.greaterThan(0.0), () => {
+    const s = sqrt(h);
+    res.assign(vec2(b.negate().sub(s), b.negate().add(s)));
+  });
+  return res;
+}).setLayout({ name: 'sphHit', type: 'vec2', inputs: [{ name: 'ro', type: 'vec3' }, { name: 'rd', type: 'vec3' }, { name: 'c', type: 'vec3' }, { name: 'r', type: 'float' }] });
+
+const hash3 = (c) => fract(sin(vec3(
+  dot(c, vec3(127.1, 311.7, 74.7)),
+  dot(c, vec3(269.5, 183.3, 246.1)),
+  dot(c, vec3(113.5, 271.9, 124.6)))).mul(43758.5453));
+
+const rotY = (p, a) => {
+  const c = cos(a), s = sin(a);
+  return vec3(p.x.mul(c).sub(p.z.mul(s)), p.y, p.x.mul(s).add(p.z.mul(c)));
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// palette
+////////////////////////////////////////////////////////////////////////////////
+const C_YEL   = vec3(1.00, 0.74, 0.06);
+const C_GRN   = vec3(0.30, 0.62, 0.035);
+const C_MAG   = vec3(0.85, 0.10, 0.52);
+const C_VIO   = vec3(0.36, 0.30, 0.95);
+const C_LAV   = vec3(0.70, 0.68, 1.00);
+const C_DARK  = vec3(0.020, 0.012, 0.045);
+const C_PURP  = vec3(0.16, 0.12, 0.46);
+const C_SAGE  = vec3(0.22, 0.34, 0.26);
+
+////////////////////////////////////////////////////////////////////////////////
+// studio: seamless cyclorama (wall + floor) in the violet / sage palette
+////////////////////////////////////////////////////////////////////////////////
+const FLOOR_Y = -1.04;
+const C_WALL_LO = vec3(0.25, 0.21, 0.48);
+const C_WALL_HI = vec3(0.025, 0.02, 0.07);
+const C_FLOOR   = vec3(0.32, 0.29, 0.46);
+const sageMix = (d) => smoothstep(0.2, 1.0, cos(d.z.atan(d.x).sub(0.7))).mul(0.55);
+// wall colour for a direction (also the horizon colour of the floor)
+const wallCol = (d) => {
+  const c = mix(C_WALL_LO, C_WALL_HI, smoothstep(-0.02, 0.45, d.y)).toVar();
+  c.assign(mix(c, C_SAGE.mul(mix(1.15, 0.35, smoothstep(0.0, 0.7, d.y))), sageMix(d)));
+  // soft light spill on the backdrop
+  c.addAssign(C_LAV.mul(pow(max(dot(d, normalize(vec3(-0.35, 0.12, -1.0))), 0.0), 5.0)).mul(0.22));
+  return c;
+};
+// environment (reflections / refraction): wall above, softly lit floor below
+const background = Fn(([rd]) => {
+  const fl = C_FLOOR.mul(mix(1.0, 0.35, smoothstep(0.0, -0.8, rd.y)));
+  const flc = mix(fl, C_SAGE.mul(0.9), sageMix(rd));
+  return mix(wallCol(vec3(rd.x, max(rd.y, 0.0), rd.z)), flc, smoothstep(0.0, -0.12, rd.y));
+}).setLayout({ name: 'bgCol', type: 'vec3', inputs: [{ name: 'rd', type: 'vec3' }] });
+
+// iq's analytic soft shadow of a sphere
+const sphSoft = (ro, rd, r, k) => {
+  const b = dot(ro, rd), c = dot(ro, ro).sub(r * r), h = b.mul(b).sub(c);
+  const d = sqrt(max(float(r * r).sub(h), 0.0)).sub(r);
+  const tt = b.negate().sub(sqrt(max(h, 0.0)));
+  return select(tt.lessThan(0.0), float(1.0), smoothstep(0.0, 1.0, d.mul(2.5 * k).div(tt)));
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// membrane veins (unit-sphere coordinates)
+////////////////////////////////////////////////////////////////////////////////
+// exact distance to the voronoi cell border (iq's two-pass method), in cell units.
+// Unlike F2-F1 it never balloons where two feature points sit close together.
+const vorEdge = Fn(([p]) => {
+  const ip = floor(p), fp = fract(p);
+  const mr = vec3(0.0).toVar(), mg = vec3(0.0).toVar();
+  const md = float(8.0).toVar();
+  Loop({ start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_vi' }, { start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_vj' }, { start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_vk' }, ({ lp_vi: vi, lp_vj: vj, lp_vk: vk }) => {
+    const g = vec3(float(vi), float(vj), float(vk));
+    const r = g.add(hash3(ip.add(g)).mul(0.8).add(0.1)).sub(fp);
+    const d = dot(r, r);
+    If(d.lessThan(md), () => { md.assign(d); mr.assign(r); mg.assign(g); });
+  });
+  const ed = float(8.0).toVar();
+  Loop({ start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_wi' }, { start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_wj' }, { start: uOne.negate(), end: uOne, condition: '<=', name: 'lp_wk' }, ({ lp_wi: wi, lp_wj: wj, lp_wk: wk }) => {
+    const g = mg.add(vec3(float(wi), float(wj), float(wk)));
+    const r = g.add(hash3(ip.add(g)).mul(0.8).add(0.1)).sub(fp);
+    const dr = r.sub(mr);
+    If(dot(dr, dr).greaterThan(1e-5), () => {
+      ed.assign(min(ed, dot(mr.add(r).mul(0.5), normalize(dr))));
+    });
+  });
+  return ed;
+}).setLayout({ name: 'vorEdge', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+
+// returns tube height 0..1 (rounded profile) for a 3-level branching network
+const veinBig = Fn(([s]) => {
+  const warp = mx_noise_vec3(s.mul(1.3).add(3.1)).mul(0.24);
+  // trunks
+  const e1 = vorEdge(s.add(warp).mul(1.7)).mul(2.0);
+  const wd1 = float(0.042).mul(mx_noise_float(s.mul(2.2)).mul(0.5).add(0.85));
+  const h1 = clamp(float(1.0).sub(e1.div(wd1).pow(2.0)), 0.0, 1.0).sqrt()
+    .mul(smoothstep(-0.35, 0.05, mx_noise_float(s.mul(1.1).add(7.0))));
+  // branches
+  const e2 = vorEdge(s.add(warp.mul(1.25)).mul(3.6).add(11.0)).mul(2.0);
+  const wd2 = float(0.026).mul(mx_noise_float(s.mul(4.0)).mul(0.5).add(0.8));
+  const h2 = clamp(float(1.0).sub(e2.div(wd2).pow(2.0)), 0.0, 1.0).sqrt()
+    .mul(smoothstep(-0.05, 0.3, mx_noise_float(s.mul(2.0).add(1.7)))).mul(0.62);
+  return max(h1, h2);
+});
+// fine capillaries (flat, colour only)
+const veins = Fn(([s]) => {
+  const warp = mx_noise_vec3(s.mul(2.3).add(5.1)).mul(0.08);
+  const w3 = mx_worley_noise_vec2(s.add(warp).mul(8.0).add(23.0), 0.8);
+  const e3 = w3.y.sub(w3.x);
+  return float(1.0).sub(smoothstep(0.008, 0.03, e3))
+    .mul(smoothstep(0.1, 0.45, mx_noise_float(s.mul(3.1).add(9.3)))).mul(0.55);
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// shape: deformed egg (ellipsoid + lumps + creases)
+////////////////////////////////////////////////////////////////////////////////
+const ERAD = vec3(1.2, 0.93, 0.96);
+const TILT = 0.38;
+const rotZ = (p, a) => {
+  const c = cos(a), s = sin(a);
+  return vec3(p.x.mul(c).sub(p.y.mul(s)), p.x.mul(s).add(p.y.mul(c)), p.z);
+};
+// ray vs. ellipsoid scaled by k (object space), returns (tNear, tFar)
+const ellHit = Fn(([ro, rd, k]) => {
+  const rr = ERAD.mul(k);
+  const o = ro.div(rr), d = rd.div(rr);
+  const a = dot(d, d), b = dot(o, d), c = dot(o, o).sub(1.0);
+  const h = b.mul(b).sub(a.mul(c));
+  const res = vec2(-1.0, -1.0).toVar();
+  If(h.greaterThan(0.0), () => {
+    const s = sqrt(h);
+    res.assign(vec2(b.negate().sub(s).div(a), b.negate().add(s).div(a)));
+  });
+  return res;
+}).setLayout({ name: 'ellHit', type: 'vec2', inputs: [{ name: 'ro', type: 'vec3' }, { name: 'rd', type: 'vec3' }, { name: 'k', type: 'float' }] });
+const eggSDF = Fn(([p]) => {
+  const t = uTime;
+  const k0 = length(p.div(ERAD)), k1 = length(p.div(ERAD.mul(ERAD)));
+  const e = k0.mul(k0.sub(1.0)).div(k1);
+  // egg asymmetry: one end fuller
+  const egg = e.sub(p.x.mul(0.06)).add(p.x.mul(p.x).mul(0.02));
+  const lump = mx_noise_float(p.mul(1.5).add(vec3(0.0, t.mul(0.04), 1.3))).mul(0.06);
+  const dent = mx_noise_float(p.mul(3.0).add(4.7)).mul(0.018);
+  const crease = pow(smoothstep(0.6, 1.0, float(1.0).sub(abs(mx_noise_float(p.mul(2.1).add(9.0))))), 2.0).mul(0.02);
+  return egg.add(lump).add(dent).add(crease).sub(uPulse.mul(0.012));
+}).setLayout({ name: 'eggSDF', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+const eggNormal = Fn(([p]) => {
+  const e = 0.004;
+  const a = vec3(1, -1, -1), b = vec3(-1, -1, 1), c = vec3(-1, 1, -1), d = vec3(1, 1, 1);
+  return normalize(
+    a.mul(eggSDF(p.add(a.mul(e)))).add(b.mul(eggSDF(p.add(b.mul(e)))))
+     .add(c.mul(eggSDF(p.add(c.mul(e))))).add(d.mul(eggSDF(p.add(d.mul(e))))));
+}).setLayout({ name: 'eggNormal', type: 'vec3', inputs: [{ name: 'p', type: 'vec3' }] });
+
+////////////////////////////////////////////////////////////////////////////////
+// main image
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// glass worm (after Kali's "Glass Eel"): chain of capsules, analytic hits
+////////////////////////////////////////////////////////////////////////////////
+const capHit = Fn(([ro, rd, pa, pb, ra]) => {
+  const ba = pb.sub(pa), oa = ro.sub(pa);
+  const baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa);
+  const rdoa = dot(rd, oa), oaoa = dot(oa, oa);
+  const a = baba.sub(bard.mul(bard)).max(1e-6);
+  const b = baba.mul(rdoa).sub(baoa.mul(bard));
+  const c = baba.mul(oaoa).sub(baoa.mul(baoa)).sub(ra.mul(ra).mul(baba));
+  const h = b.mul(b).sub(a.mul(c));
+  const res = float(-1.0).toVar();
+  If(h.greaterThanEqual(0.0), () => {
+    const tt = b.negate().sub(sqrt(h)).div(a);
+    const y = baoa.add(tt.mul(bard));
+    If(y.greaterThan(0.0).and(y.lessThan(baba)), () => { res.assign(tt); }).Else(() => {
+      const oc = select(y.lessThanEqual(0.0), oa, ro.sub(pb));
+      const b2 = dot(rd, oc), c2 = dot(oc, oc).sub(ra.mul(ra));
+      const h2 = b2.mul(b2).sub(c2);
+      If(h2.greaterThan(0.0), () => { res.assign(b2.negate().sub(sqrt(h2))); });
+    });
+  });
+  return res;
+}).setLayout({ name: 'capHit', type: 'float', inputs: [{ name: 'ro', type: 'vec3' }, { name: 'rd', type: 'vec3' }, { name: 'pa', type: 'vec3' }, { name: 'pb', type: 'vec3' }, { name: 'ra', type: 'float' }] });
+
+////////////////////////////////////////////////////////////////////////////////
+// organic virus spikes: stalk + teardrop head, smooth-unioned into the membrane
+////////////////////////////////////////////////////////////////////////////////
+const sminP = (a, b, k) => {
+  const hb = max(float(k).sub(abs(a.sub(b))), 0.0);
+  return min(a, b).sub(hb.mul(hb).mul(0.25 / k));
+};
+// one spike (the one this pixel's ray passes): stalk thinning to a teardrop head
+const oneSpike = Fn(([p, A, B]) => {
+  const ba = B.xyz.sub(A.xyz), pa = p.sub(A.xyz);
+  const h = clamp(dot(pa, ba).div(dot(ba, ba).max(1e-6)), 0.0, 1.0);
+  const stalk = length(pa.sub(ba.mul(h))).sub(A.w.mul(mix(1.35, 0.8, h)));
+  const head = length(p.sub(B.xyz)).sub(B.w);
+  const neck = length(p.sub(B.xyz.sub(ba.mul(0.18)))).sub(B.w.mul(0.62));
+  return sminP(sminP(stalk, neck, 0.035), head, 0.03);
+}).setLayout({ name: 'oneSpike', type: 'float', inputs: [{ name: 'p', type: 'vec3' }, { name: 'A', type: 'vec4' }, { name: 'B', type: 'vec4' }] });
+// membrane + spike with a soft fillet where it grows out
+// spike field: two spikes + a cheap stand-in for the membrane (ellipsoid + main lumps, sunk slightly
+// below the real skin) so the root gets a soft fillet; the real membrane is traced separately
+const eggLite = Fn(([p]) => {
+  const k0 = length(p.div(ERAD)), k1 = length(p.div(ERAD.mul(ERAD)));
+  const e = k0.mul(k0.sub(1.0)).div(k1).sub(p.x.mul(0.06)).add(p.x.mul(p.x).mul(0.02));
+  return e.add(mx_noise_float(p.mul(1.5).add(vec3(0.0, uTime.mul(0.04), 1.3))).mul(0.06)).add(0.012);
+}).setLayout({ name: 'eggLite', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+// all active spikes at once (real loop) -> no spike can ever be clipped by another
+const allSpikes = Fn(([p]) => {
+  const d = float(1e3).toVar();
+  Loop({ start: 0, end: uSpk, name: 'loopSpk' }, ({ loopSpk: si }) => {
+    const A = uSpA.element(si), B = uSpB.element(si);
+    If(B.w.greaterThan(0.0005), () => { d.assign(min(d, oneSpike(p, A, B))); });
+  });
+  return d;
+}).setLayout({ name: 'allSpikes', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+const spkField = Fn(([p]) => sminP(eggLite(p), allSpikes(p), 0.06))
+  .setLayout({ name: 'spkField', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+const spkNormal = Fn(([p]) => {
+  const e = 0.003;
+  const a = vec3(1, -1, -1), b = vec3(-1, -1, 1), c = vec3(-1, 1, -1), d = vec3(1, 1, 1);
+  return normalize(a.mul(spkField(p.add(a.mul(e)))).add(b.mul(spkField(p.add(b.mul(e)))))
+    .add(c.mul(spkField(p.add(c.mul(e))))).add(d.mul(spkField(p.add(d.mul(e))))));
+}).setLayout({ name: 'spkNormal', type: 'vec3', inputs: [{ name: 'p', type: 'vec3' }] });
+
+// smooth tube: tapered segments blended with a smooth-min (no visible joints)
+const wormSDF = Fn(([p]) => {
+  const d = float(1e3).toVar();
+  Loop({ start: 0, end: uSeg, name: 'lp_ws' }, ({ lp_ws: ws }) => {
+    const A = uWorm.element(ws), B = uWorm.element(ws.add(1));
+    const pa = p.sub(A.xyz), ba = B.xyz.sub(A.xyz);
+    const h = clamp(dot(pa, ba).div(dot(ba, ba)), 0.0, 1.0);
+    const dj = length(pa.sub(ba.mul(h))).sub(mix(A.w, B.w, h));
+    // opSmoothUnion (k*4 blend width): long, soft fusing between segments
+    const k4 = 0.036 * 4.0;
+    const hb = max(float(k4).sub(abs(d.sub(dj))), 0.0);
+    d.assign(min(d, dj).sub(hb.mul(hb).mul(0.25 / k4)));
+  });
+  return d;
+}).setLayout({ name: 'wormSDF', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+// nearest-segment axis + body coordinate u (0 head .. WN-1 tail)
+const wormAxis = Fn(([p]) => {
+  const best = float(1e3).toVar();
+  const res = vec4(0.0, 0.0, 1.0, 0.0).toVar();
+  Loop({ start: 0, end: uSeg, name: 'lp_wa' }, ({ lp_wa: wa }) => {
+    const A = uWorm.element(wa), B = uWorm.element(wa.add(1));
+    const pa = p.sub(A.xyz), ba = B.xyz.sub(A.xyz);
+    const h = clamp(dot(pa, ba).div(dot(ba, ba)), 0.0, 1.0);
+    const dj = length(pa.sub(ba.mul(h))).sub(mix(A.w, B.w, h));
+    If(dj.lessThan(best), () => { best.assign(dj); res.assign(vec4(normalize(ba), float(wa).add(h))); });
+  });
+  return res;
+}).setLayout({ name: 'wormAxis', type: 'vec4', inputs: [{ name: 'p', type: 'vec3' }] });
+
+const cocoon = Fn(() => {
+  const t = uTime;
+  const res = screenSize;
+  const aspect = res.x.div(res.y);
+  const k = max(1.22, float(1.3).div(aspect));
+  const p = screenUV.mul(2.0).sub(1.0).mul(vec2(aspect, -1.0)).mul(k).toVar();
+
+  // camera (world)
+  const tgt = vec3(0.0, -0.18, 0.0);
+  const roW = tgt.add(vec3(sin(uYaw).mul(cos(uPitch)), sin(uPitch), cos(uYaw).mul(cos(uPitch))).mul(uZoom.mul(2.85)));
+  const fw = normalize(tgt.sub(roW));
+  const rt = normalize(vec3(fw.z.negate(), 0.0, fw.x));
+  const up = vec3(rt.y.mul(fw.z).sub(rt.z.mul(fw.y)), rt.z.mul(fw.x).sub(rt.x.mul(fw.z)), rt.x.mul(fw.y).sub(rt.y.mul(fw.x)));
+  const rdW = normalize(fw.mul(1.9).add(rt.mul(p.x)).add(up.mul(p.y))).toVar();
+
+  // object space: tilted egg with a slow sway
+  const sway = sin(t.mul(0.13)).mul(0.18);
+  const toObj = (v) => rotY(rotZ(v, float(TILT).negate()), sway);
+  const toWorld = (v) => rotZ(rotY(v, sway.negate()), float(TILT));
+  const ro = toObj(roW), rd = toObj(rdW);
+
+  const L1 = toObj(normalize(vec3(-0.5, 0.75, 0.6)));
+  const L2 = toObj(normalize(vec3(0.75, 0.35, 0.5)));
+  const core = vec3(-0.28, 0.0, 0.05);
+  const nc = vec3(0.4, 0.06, 0.28)
+    .add(vec3(sin(t.mul(0.41)).mul(0.02), sin(t.mul(0.53)).mul(0.016), 0.0))
+    .add(toObj(uTwitch));
+  const nr = float(0.24).add(uPulse.mul(0.006));
+
+  // ------------------------------------------------------------ studio backdrop + floor shadows
+  const col = wallCol(rdW).toVar();
+  If(rdW.y.lessThan(0.0), () => {
+    const tf = float(FLOOR_Y).sub(roW.y).div(rdW.y);
+    const P = roW.add(rdW.mul(tf));
+    const rr = length(P.xz);
+    const flc = mix(C_FLOOR.mul(0.3), C_FLOOR.mul(1.1), exp(rr.mul(rr).mul(-0.1))).toVar();
+    flc.assign(mix(flc, C_SAGE.mul(0.95), sageMix(normalize(vec3(P.x, 0.0, P.z)))));
+    // egg as a scaled unit sphere in object space
+    const Po = toObj(P).div(ERAD);
+    const Ld = normalize(toObj(normalize(vec3(-0.5, 0.75, 0.6))).div(ERAD));
+    const drop = sphSoft(Po, Ld, 1.0, 0.9);                          // soft drop shadow
+    const Lt = normalize(toObj(vec3(0.0, 1.0, 0.0)).div(ERAD));
+    const amb = sphSoft(Po, Lt, 1.0, 0.25);                          // wide ambient occlusion
+    const dE = length(toObj(P).div(ERAD)).sub(1.0).mul(0.95);
+    const contact = exp(max(dE, 0.0).mul(-9.0));                    // tight contact shadow
+    flc.mulAssign(drop.mul(0.5).add(0.5));
+    flc.mulAssign(amb.mul(0.45).add(0.55));
+    flc.mulAssign(float(1.0).sub(contact.mul(0.8)));
+    // seamless sweep into the wall towards the horizon
+    col.assign(mix(flc, wallCol(vec3(rdW.x, 0.0, rdW.z)), smoothstep(3.0, 16.0, tf)));
+  });
+
+  // bounding ellipsoid, then sphere-trace the deformed surface
+  const bnd = ellHit(ro, rd, float(1.09));
+  const tS = float(-1.0).toVar();
+  // spike bounds: if the ray passes near any spike, trace membrane+spikes together
+  const tSpk = float(1e5).toVar();
+  const kA = vec4(0.0, 50.0, 0.0, 0.0).toVar(), kB = vec4(0.0, 50.1, 0.0, 0.0).toVar(), kC = vec4(0.0).toVar();
+  Loop({ start: 0, end: uSpk, name: 'lp_sb' }, ({ lp_sb: sb }) => {
+    const A = uSpA.element(sb), B = uSpB.element(sb);
+    If(B.w.greaterThan(0.0005), () => {
+      const t0c = dot(A.xyz.add(B.xyz).mul(0.5).sub(ro), rd).sub(0.6).max(0.0);
+      const tb = capHit(ro.add(rd.mul(t0c)), rd, A.xyz, B.xyz, B.w.add(0.15));
+      If(tb.greaterThan(0.0), () => { tSpk.assign(min(tSpk, tb.add(t0c))); });
+    });
+  });
+  const spikeMode = tSpk.lessThan(1e4);
+  // 1) the membrane, traced exactly as without spikes
+  If(bnd.x.greaterThan(0.0), () => {
+    const tt = bnd.x.toVar();
+    for (let j = 0; j < 11; j++) tt.addAssign(eggSDF(ro.add(rd.mul(tt))).mul(0.92));
+    If(eggSDF(ro.add(rd.mul(tt))).lessThan(0.02).and(tt.lessThan(bnd.y)), () => { tS.assign(tt); });
+  });
+  // 2) the spikes, traced on their own; they win wherever they are in front of the membrane
+  const onSpike = float(0.0).toVar();
+  If(spikeMode, () => {
+    const ts = tSpk.toVar();
+    const dl = float(1.0).toVar();
+    Loop({ start: 0, end: uTr16, name: 'lp_stl' }, () => {
+      dl.assign(spkField(ro.add(rd.mul(ts))));
+      ts.addAssign(max(dl, 0.002));
+    });
+    const pe = ro.add(rd.mul(ts));
+    const dS = allSpikes(pe);
+    const front = tS.lessThan(0.0).or(ts.lessThan(tS));
+    // accept only the spike itself or its fillet (not the membrane stand-in)
+    If(dl.lessThan(0.006).and(dS.lessThan(0.05)).and(front), () => { tS.assign(ts); onSpike.assign(1.0); });
+  });
+
+  If(tS.greaterThan(0.0), () => {
+    const t0 = tS;
+    const t1 = max(ellHit(ro, rd, float(1.0)).y, t0.add(0.05));
+    const nh = sphHit(ro, rd, nc, nr);
+    const hasN = nh.x.greaterThan(t0).and(nh.x.lessThan(t1));
+    const tEnd = select(hasN, nh.x, t1);
+
+    // ------------------------------------------------------------ worm hit + halo
+    // capsules give a cheap entry bound, then a few SDF steps land on the smooth tube
+    const tW = float(1e5).toVar();
+    const halo = float(0.0).toVar();
+    Loop({ start: 0, end: uSeg, name: 'lp_wb' }, ({ lp_wb: wb }) => {
+      const A = uWorm.element(wb), B = uWorm.element(wb.add(1));
+      const th = capHit(ro, rd, A.xyz, B.xyz, max(A.w, B.w).mul(1.2).add(0.05));
+      If(th.greaterThan(t0).and(th.lessThan(tW)), () => { tW.assign(th); });
+      const tp = max(dot(A.xyz.sub(ro), rd), t0);
+      const dl = length(ro.add(rd.mul(tp)).sub(A.xyz));
+      halo.addAssign(exp(dl.div(A.w).mul(-1.1)).mul(step(tp, tEnd)));
+    });
+    If(tW.lessThan(tEnd), () => {
+      const tt = tW.toVar();
+      for (let j = 0; j < 8; j++) tt.addAssign(wormSDF(ro.add(rd.mul(tt))));
+      tW.assign(select(wormSDF(ro.add(rd.mul(tt))).lessThan(0.004), tt, float(1e5)));
+    });
+    const wormOn = tW.lessThan(tEnd);
+    const wormCol = vec3(0.0).toVar();
+    const wT = float(1.0).toVar();
+    If(wormOn, () => {
+      const pw = ro.add(rd.mul(tW));
+      const e = 0.003;
+      const nw = normalize(
+        vec3(1, -1, -1).mul(wormSDF(pw.add(vec3(1, -1, -1).mul(e))))
+        .add(vec3(-1, -1, 1).mul(wormSDF(pw.add(vec3(-1, -1, 1).mul(e)))))
+        .add(vec3(-1, 1, -1).mul(wormSDF(pw.add(vec3(-1, 1, -1).mul(e)))))
+        .add(vec3(1, 1, 1).mul(wormSDF(pw.add(vec3(1, 1, 1).mul(e))))));
+      const axu = wormAxis(pw);
+      const ax = axu.xyz, u = axu.w;
+      // one continuous body: no segment rings, just Kali-style fine skin bumps (faded before they alias)
+      const ring = float(0.0);
+      const wpix = length(dFdx(pw)).add(length(dFdy(pw))).max(1e-5);
+      const sk = smoothstep(0.45, 0.12, wpix.mul(40.0));
+      const n2 = normalize(nw.add(mx_noise_vec3(pw.mul(40.0).add(vec3(0.0, 0.0, t.mul(0.4)))).mul(0.07).mul(sk)));
+      const cw = max(dot(rd.negate(), n2), 0.0);
+      const fw = pow(float(1.0).sub(cw), 3.0);
+      const rw = reflect(rd, n2);
+      const sbU = normalize(cross(L1, vec3(0.0, 0.0, 1.0)));
+      const sbV = cross(L1, sbU);
+      const box = smoothstep(0.42, 0.16, abs(dot(rw, sbU))).mul(smoothstep(0.24, 0.05, abs(dot(rw, sbV)))).mul(smoothstep(0.0, 0.3, dot(rw, L1)));
+      const spw = box.mul(1.2).add(pow(max(dot(rw, L2), 0.0), 60.0).mul(0.6))
+        .add(pow(max(dot(rw, L1), 0.0), 20.0).mul(0.3));
+      const gW = exp(length(pw.sub(core)).mul(-2.0));
+      // toxic snot green: slimy, saturated yellow-green body, sickly lime rim, murky olive gut
+      const gut = smoothstep(0.78, 0.98, cw).mul(smoothstep(0.1, 0.9, u.div(WN - 1)).mul(0.5).add(0.5));
+      const body = vec3(0.3, 0.62, 0.0).mul(fw.mul(1.5).add(0.12))
+        .add(vec3(0.75, 0.9, 0.2).mul(gW).mul(0.08))
+        .add(vec3(0.75, 1.0, 0.15).mul(pow(float(1.0).sub(cw), 5.0)).mul(1.8));
+      const bands = pow(max(dot(rw, L1), 0.0), 12.0).mul(0.4).add(pow(max(dot(rw, normalize(core.sub(pw))), 0.0), 8.0).mul(0.25));
+      const groove = float(0.0);
+      wormCol.assign(mix(body, vec3(0.06, 0.09, 0.0), gut.mul(0.75))
+        .mul(float(1.0).sub(groove.mul(0.2)))
+        .add(vec3(0.6, 0.95, 0.1).mul(smoothstep(0.4, 1.0, ring.negate())).mul(fw.add(0.15)).mul(0.3))
+        .add(spw.mul(1.3)).add(vec3(0.85, 1.0, 0.45).mul(bands)));
+      wT.assign(mix(float(0.12), float(0.05), fw).mul(float(1.0).sub(gut.mul(0.45))).mul(float(1.0).sub(groove.mul(0.2))));
+    });
+
+    // ------------------------------------------------------------ yolk volume
+    const STEPS = 26;
+    const dt = tEnd.sub(t0).div(STEPS);
+    const jit = fract(sin(dot(screenUV.mul(res), vec2(12.9898, 78.233))).mul(43758.5453));
+    const vol = vec3(0.0).toVar();
+    const T = float(1.0).toVar();
+    const crossed = float(0.0).toVar();
+    Loop(STEPS, ({ i }) => {
+      const tq = t0.add(float(i).add(jit).mul(dt));
+      If(wormOn.and(tq.greaterThan(tW)).and(crossed.equal(0.0)), () => {
+        vol.addAssign(wormCol.mul(T));
+        T.mulAssign(wT);
+        crossed.assign(1.0);
+      });
+      const q = ro.add(rd.mul(tq));
+      const qe = length(q.div(ERAD));
+      const qn = rotY(q, t.mul(0.05));
+      const g = exp(length(q.sub(core).div(vec3(1.25, 1.0, 1.0))).mul(-2.6));
+      const n = mx_fractal_noise_float(qn.mul(2.2).add(vec3(0.0, t.mul(0.04), 0.0)), 3, 2.0, 0.5);
+      const wisp = pow(float(1.0).sub(abs(mx_noise_float(qn.mul(3.4).add(n.mul(1.5))))), 7.0);
+      const dens = g.mul(1.5).mul(n.mul(0.9).add(0.75)).add(wisp.mul(0.14)).add(0.03).max(0.0);
+      const c = mix(C_GRN, C_YEL, smoothstep(0.22, 0.7, g)).toVar();
+      c.assign(mix(c, C_MAG, smoothstep(0.05, 0.85, q.x.mul(0.7).add(q.y.mul(0.6)).sub(g.mul(0.7))).mul(0.8)));
+      c.assign(mix(c, C_VIO, smoothstep(0.75, 1.0, qe).mul(0.35)));
+      c.addAssign(vec3(1.0, 0.35, 0.08).mul(exp(length(q.sub(nc)).mul(-7.0))).mul(0.35));
+      vol.addAssign(c.mul(dens).mul(T).mul(dt).mul(2.3));
+      T.mulAssign(exp(dens.mul(dt).mul(-1.25)));
+    });
+
+    If(wormOn.and(crossed.equal(0.0)), () => { vol.addAssign(wormCol.mul(T)); T.mulAssign(wT); });
+    // soft green glow around the worm (the eel's volume glow)
+    vol.addAssign(vec3(0.45, 0.9, 0.05).mul(halo).mul(0.07));
+
+    // ------------------------------------------------------------ drifting specks
+    Loop({ start: 0, end: uShell, name: 'lp_sh' }, ({ lp_sh: si }) => {
+      const idx = float(si);
+      const shR = float(0.93).sub(idx.mul(0.079));
+      const sh = ellHit(ro, rd, shR);
+      If(sh.x.greaterThan(t0).and(sh.x.lessThan(tEnd)), () => {
+        const q = ro.add(rd.mul(sh.x));
+        const odd = idx.mod(2.0);
+        const qr = rotY(q, t.mul(mix(-0.028, 0.035, odd)).add(idx.mul(1.7))).add(vec3(0.0, t.mul(0.01), 0.0));
+        const F = idx.mul(1.1).add(17.0);
+        const cell = floor(qr.mul(F));
+        const h = hash3(cell.add(idx.mul(17.0)));
+        const pt = cell.add(0.5).add(h.sub(0.5).mul(0.7));
+        const d = length(qr.mul(F).sub(pt));
+        const s = smoothstep(h.z.mul(0.18).add(0.05), 0.0, d).mul(step(0.32, h.x));
+        const tw = sin(t.mul(2.3).add(h.y.mul(40.0))).mul(0.4).add(0.6);
+        const g = exp(length(q.sub(core)).mul(-2.2));
+        const att = exp(sh.x.sub(t0).mul(-0.9)).mul(select(wormOn.and(sh.x.greaterThan(tW)), wT, float(1.0)));
+        vol.addAssign(vec3(1.0, 0.86, 0.42).mul(s).mul(tw).mul(g.mul(2.6).add(0.25)).mul(att).mul(1.5));
+      });
+    });
+
+    // ------------------------------------------------------------ embryo / back wall
+    const back = vec3(0.0).toVar();
+    If(hasN, () => {
+      const pn = ro.add(rd.mul(nh.x));
+      const nn = normalize(pn.sub(nc));
+      const ln = rotY(nn, t.mul(0.08));
+      const w = mx_worley_noise_vec2(ln.mul(15.0), 1.0).x;
+      const gran = float(1.0).sub(smoothstep(0.0, 0.55, w));
+      const speck = mx_noise_float(ln.mul(48.0));
+      const Ln = normalize(core.sub(pn));
+      const diff = max(dot(nn, Ln), 0.0).mul(0.75).add(0.25);
+      const base = mix(vec3(0.28, 0.01, 0.008), vec3(0.95, 0.28, 0.03), gran.mul(0.85).add(0.08).mul(diff).add(speck.mul(0.2)));
+      const hi = vec3(1.0, 0.72, 0.22).mul(smoothstep(0.8, 0.97, gran)).mul(diff).mul(0.3);
+      const rim = dot(nn, rd.negate()).mul(0.6).add(0.4);
+      back.assign(base.add(hi).mul(rim).mul(float(0.8).add(uPulse.mul(0.2))));
+    }).Else(() => {
+      const pb = ro.add(rd.mul(t1));
+      const nb = normalize(pb.div(ERAD.mul(ERAD)));
+      const bw = background(toWorld(normalize(rd.add(nb.mul(0.35))))).mul(vec3(0.7, 0.35, 0.9)).mul(0.22);
+      const vb = veinBig(pb);
+      back.assign(mix(bw.add(C_MAG.mul(0.05)), vec3(0.12, 0.01, 0.04), vb.mul(0.6)));
+    });
+
+    const inside = vol.add(back.mul(T));
+
+    // ------------------------------------------------------------ membrane surface
+    const ph = ro.add(rd.mul(t0));
+    const n = select(onSpike.greaterThan(0.5), spkNormal(ph), eggNormal(ph)).toVar();
+    {
+      // the spike this point belongs to (for colour, AO, head/stalk)
+      If(onSpike.greaterThan(0.5), () => {
+        const best = float(1e3).toVar();
+        Loop({ start: 0, end: uSpk, name: 'lp_ns' }, ({ lp_ns: ns }) => {
+          const A = uSpA.element(ns), B = uSpB.element(ns), C = uSpC.element(ns);
+          const dd = select(B.w.greaterThan(0.0005), oneSpike(ph, A, B), float(1e3));
+          If(dd.lessThan(best), () => { best.assign(dd); kA.assign(A); kB.assign(B); kC.assign(C); });
+        });
+      });
+    }
+    // how much of this point belongs to a spike (vs plain membrane)
+    const dSpk = oneSpike(ph, kA, kB);
+    const spW = onSpike.mul(smoothstep(0.05, -0.005, dSpk));
+    const kba = kB.xyz.sub(kA.xyz);
+    const spAO = float(1.0).toVar();
+    const sInf = vec4(kC.x, clamp(dot(ph.sub(kA.xyz), kba).div(dot(kba, kba).max(1e-6)), 0.0, 1.0), kC.y, length(ph.sub(kB.xyz)).div(kB.w.max(1e-4)));
+    // raised veins: tube height -> screen-space bump (no extra evaluations)
+    const vh = veinBig(ph);
+    // soft grain in patches; amplitude fades out before it gets finer than ~3 px (no pixel sparkle)
+    const pix = length(dFdx(ph)).add(length(dFdy(ph))).max(1e-5);
+    const aa = (freq) => smoothstep(0.45, 0.12, pix.mul(freq));
+    const gPatch = smoothstep(-0.1, 0.45, mx_noise_float(ph.mul(1.7).add(vec3(3.0, t.mul(0.01), 0.0))));
+    const grain = mx_noise_float(ph.mul(48.0)).mul(aa(48.0)).add(mx_noise_float(ph.mul(96.0).add(5.0)).mul(0.5).mul(aa(96.0))).mul(gPatch);
+    const fib = mx_noise_float(ph.mul(vec3(14.0, 70.0, 20.0)).add(2.0)).mul(aa(70.0)).mul(gPatch);
+    const tx = normalize(vec3(n.z, 0.0, n.x.negate()).add(vec3(0.0001, 0.0, 0.0)));
+    const ty = cross(n, tx);
+    const ev = 0.006;
+    const gx = veinBig(ph.add(tx.mul(ev))).sub(vh).div(ev);
+    const gy = veinBig(ph.add(ty.mul(ev))).sub(vh).div(ev);
+    // tap pustules (shading-only bumps)
+    const nb = normalize(n.sub(tx.mul(gx).add(ty.mul(gy)).mul(float(0.011).mul(float(1.0).sub(spW)))));
+    // tap ripple
+    const nW = normalize(ph);
+    const rAng = acos(clamp(dot(nW, toObj(vec3(uRipple.x, uRipple.y, uRipple.z))), -1.0, 1.0));
+    const wave = exp(rAng.sub(uRipple.w.mul(1.6)).mul(7.0).pow(2.0).negate()).mul(exp(uRipple.w.mul(-1.3)));
+    const np = normalize(nb
+      .add(mx_noise_vec3(ph.mul(6.0).add(t.mul(0.05))).mul(0.035))
+      .add(mx_noise_vec3(ph.mul(13.0)).mul(wave.mul(0.35))));
+    const cosT = max(dot(rd.negate(), np), 0.0);
+    const fres = pow(float(1.0).sub(cosT), 4.0).mul(0.7).add(0.025);
+    const refl = reflect(rd, np);
+    // softbox reflection (rectangular studio light) + small fill
+    const sbU = normalize(cross(L1, vec3(0.0, 0.0, 1.0)));
+    const sbV = cross(L1, sbU);
+    const rl = dot(refl, L1);
+    const box = smoothstep(0.42, 0.18, abs(dot(refl, sbU))).mul(smoothstep(0.24, 0.06, abs(dot(refl, sbV)))).mul(smoothstep(0.0, 0.3, rl));
+    const spec = box.mul(1.7)
+      .add(pow(max(dot(refl, L2), 0.0), 90.0).mul(0.5))
+      .add(pow(max(rl, 0.0), 10.0).mul(0.05));
+    const env = background(toWorld(refl)).mul(0.8).add(C_LAV.mul(0.035));
+
+    // thickness: membrane gets milkier/denser toward grazing angles, with grain
+    const thick = pow(float(1.0).sub(cosT), 2.0);
+    const milk = vec3(0.62, 0.58, 0.8).mul(grain.mul(0.25).add(fib.mul(0.15)).add(0.75));
+    const surf = mix(inside, inside.mul(0.55).add(milk.mul(0.22)), thick.mul(0.55)).toVar();
+    surf.assign(surf.mul(float(1.0).sub(fres)).add(env.mul(fres)));
+    // grain: soft milky speckle in patches (colour only)
+    surf.assign(surf.mul(grain.mul(0.1).add(fib.mul(0.05)).add(1.0)).add(vec3(0.75, 0.72, 0.95).mul(max(grain, 0.0)).mul(0.05)));
+    surf.addAssign(C_LAV.mul(pow(float(1.0).sub(cosT), 8.0)).mul(0.22));
+    surf.addAssign(C_LAV.mul(wave).mul(0.22));
+
+    // vessels: shaded tubes with dark walls, lit tops and a wet highlight
+    const gl = exp(length(ph.sub(core)).mul(-1.6));
+    const vdif = max(dot(np, L1), 0.0).mul(0.6).add(0.22).add(max(dot(np, normalize(core.sub(ph))), 0.0).mul(0.35));
+    const vDeep = vec3(0.1, 0.004, 0.016);
+    const vRed = vec3(0.42, 0.02, 0.05).mul(float(1.0).add(uPulse.mul(0.45)).add(wave.mul(0.8)));
+    const tube = mix(vDeep, vRed, vh.mul(vdif).add(gl.mul(0.15)));
+    const vMask = smoothstep(0.0, 0.25, vh);
+    const wall = smoothstep(0.0, 0.12, vh).mul(smoothstep(0.55, 0.15, vh));    // darker outline
+    surf.assign(mix(surf, tube, vMask.mul(0.86)));
+    surf.mulAssign(float(1.0).sub(wall.mul(0.35)));
+    const cap = veins(ph);
+    surf.assign(mix(surf, mix(vDeep, vRed.mul(0.6), gl.mul(0.5).add(0.2)), cap.mul(float(1.0).sub(vMask))));
+    surf.addAssign(spec.mul(vMask.mul(0.6).add(0.55)));
+    surf.addAssign(vec3(1.0, 0.75, 0.8).mul(pow(max(dot(refl, L1), 0.0), 24.0)).mul(vh).mul(0.3));
+
+    // ambient occlusion around the spikes: membrane darkens at the root and under the head,
+    // the stalk darkens where it leaves the membrane -> spikes read as modelled out of the skin
+    If(spikeMode, () => {
+      const dHead = length(ph.sub(kB.xyz)).sub(kB.w);
+      const aoM = float(1.0).sub(exp(max(dSpk, 0.0).div(-0.05)).mul(0.5)).mul(float(1.0).sub(exp(max(dHead, 0.0).div(-0.07)).mul(0.3)));
+      const aoS = float(1.0).sub(smoothstep(0.4, 0.0, sInf.y).mul(0.55));
+      surf.mulAssign(mix(aoM, float(1.0), spW));
+      spAO.assign(aoS);
+    });
+    // spikes: membrane-coloured root, flushing to jelly-like translucent pink / neon-green teardrop heads
+    If(spW.greaterThan(0.001), () => {
+      const sc = mix(vec3(1.0, 0.3, 0.62), vec3(0.5, 1.0, 0.1), sInf.x);
+      const along = smoothstep(0.05, 0.9, sInf.y);
+      const headM = smoothstep(1.6, 0.6, sInf.w);
+      const dif = max(dot(np, L1), 0.0).mul(0.6).add(0.3);
+      const translu = pow(float(1.0).sub(cosT), 1.5);
+      const stalkC = mix(surf, sc.mul(dif).mul(0.8).add(sc.mul(translu).mul(0.35)), along.mul(0.7));
+      // head: see-through in the middle, denser and more coloured towards the rim, inner glow
+      const hAlpha = translu.mul(0.6).add(0.28);
+      const inner = sc.mul(pow(cosT, 2.0)).mul(0.45);
+      const headC = mix(surf.mul(mix(vec3(1.0), sc, 0.55)), sc.mul(dif.mul(0.6).add(0.45)), hAlpha).add(inner);
+      const spC = mix(stalkC, headC, headM).mul(spAO).add(spec.mul(0.7));
+      surf.assign(mix(surf, spC, spW));
+    });
+
+    col.assign(surf);
+  });
+
+  // ------------------------------------------------------------ soft microscope glow around spike heads
+  const spGlow = vec3(0.0).toVar();
+  Loop({ start: 0, end: uSpk, name: 'lp_sg' }, ({ lp_sg: sg }) => {
+    const B = uSpB.element(sg), C = uSpC.element(sg);
+    const tp = max(dot(B.xyz.sub(ro), rd), 0.0);
+    const dl = length(ro.add(rd.mul(tp)).sub(B.xyz));
+    const gc = mix(vec3(1.0, 0.3, 0.62), vec3(0.5, 1.0, 0.1), C.x);
+    const vis = select(tS.greaterThan(0.0), step(tp, tS.add(B.w)), float(1.0));
+    spGlow.addAssign(gc.mul(exp(dl.div(B.w.add(0.001)).mul(-1.6))).mul(C.y).mul(step(0.0005, B.w)).mul(vis).mul(0.1));
+  });
+  col.addAssign(spGlow);
+
+  // vignette
+  const vg = smoothstep(2.6, 0.5, length(p.mul(vec2(0.75, 1.0))));
+  col.mulAssign(vg.mul(0.55).add(0.45));
+  return vec4(col, 1.0);
+});
+
+////////////////////////////////////////////////////////////////////////////////
+// renderer
+////////////////////////////////////////////////////////////////////////////////
+const renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: FORCE_GL });
+renderer.setPixelRatio(SCALE || Math.min(devicePixelRatio, 1.25));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const mat = new THREE.MeshBasicNodeMaterial();
+mat.colorNode = cocoon();
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+
+const pipeline = new THREE.RenderPipeline(renderer);
+const scenePass = pass(scene, cam);
+const sp = scenePass.getTextureNode('output');
+const bl = bloom(sp, 0.28, 0.35, 0.95);
+const post = Fn(() => {
+  const uv = screenUV;
+  const dir = uv.sub(0.5);
+  const ca = dir.mul(length(dir)).mul(0.006);
+  const c = vec3(sp.sample(uv.add(ca)).r, sp.sample(uv).g, sp.sample(uv.sub(ca)).b).add(bl.rgb);
+  const gseed = dot(uv.mul(screenSize), vec2(12.9898, 78.233)).add(fract(uTime.mul(7.31)).mul(91.7));
+  const gr = fract(sin(gseed).mul(43758.5453)).sub(0.5);
+  return vec4(c.add(gr.mul(0.004)), 1.0);
+});
+pipeline.outputNode = fxaa(post());
+
+try { await renderer.init(); }
+catch (e) {
+  const el = document.getElementById('err');
+  el.style.display = 'grid'; el.textContent = 'WebGPU / WebGL2 not available: ' + e.message;
+  document.getElementById('loading').classList.add('off');
+  throw e;
+}
+
+addEventListener('resize', () => renderer.setSize(innerWidth, innerHeight));
+
+////////////////////////////////////////////////////////////////////////////////
+// interaction
+////////////////////////////////////////////////////////////////////////////////
+let yaw = parseFloat(Q.get('yaw') || '0'), pitch = 0.22, tYaw = yaw, tPitch = 0.22;
+let drag = null;
+// zoom: mouse wheel / pinch, only closer than the default view
+const ZOOM_MIN = 0.68;
+let zoom = Math.min(1, Math.max(ZOOM_MIN, parseFloat(Q.get('zoom') || '1'))), tZoom = zoom;
+const setZoom = (z) => { tZoom = Math.min(1.0, Math.max(ZOOM_MIN, z)); };
+const pts = new Map();
+let pinch = null;
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', e => {
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  cv.setPointerCapture(e.pointerId);
+  if (pts.size === 2) {
+    const [a, b] = [...pts.values()];
+    pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y), z0: tZoom };
+    drag = null;                                  // two fingers: zoom, no orbit, no tap
+  } else if (pts.size === 1) {
+    drag = { x: e.clientX, y: e.clientY, y0: tYaw, p0: tPitch, moved: 0 };
+  }
+});
+cv.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return;
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pts.size >= 2) {
+    const [a, b] = [...pts.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch.d0 > 0) setZoom(pinch.z0 * pinch.d0 / d);
+    return;
+  }
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
+  tYaw = drag.y0 - dx * 0.005;
+  tPitch = Math.max(0.02, Math.min(1.25, drag.p0 + dy * 0.004));
+});
+const endPointer = (e, allowTap) => {
+  if (!pts.has(e.pointerId)) return;
+  pts.delete(e.pointerId);
+  if (pinch) { if (pts.size < 2) pinch = null; drag = null; return; }
+  if (allowTap && drag && drag.moved < 6) tap(e.clientX, e.clientY);
+  drag = null;
+};
+cv.addEventListener('pointerup', e => endPointer(e, true));
+cv.addEventListener('pointercancel', e => endPointer(e, false));
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  setZoom(tZoom * Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
+}, { passive: false });
+
+function rayFor(cx, cy) {
+  const w = innerWidth, h = innerHeight, asp = w / h, k = Math.max(1.22, 1.3 / asp);
+  const px = (cx / w * 2 - 1) * asp * k, py = -(cy / h * 2 - 1) * k;
+  const tgt = new THREE.Vector3(0, -0.18, 0);
+  const ro = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(2.85 * zoom).add(tgt);
+  const fw = tgt.clone().sub(ro).normalize();
+  const rt = new THREE.Vector3(-fw.z, 0, fw.x).normalize();
+  const up = new THREE.Vector3().crossVectors(rt, fw).normalize();
+  const rd = fw.multiplyScalar(1.9).addScaledVector(rt, px).addScaledVector(up, py).normalize();
+  return { ro, rd };
+}
+let ripT = 99, twitchT = 99;
+// worm: head follows a slow 3D figure inside the yolk, body trails along the path, undulating
+let wormClock = (FIXED_T ?? 0) + 6;
+const wHist = [];
+function wormHead(tau) {
+  return new THREE.Vector3(
+    -0.22 + 0.44 * Math.sin(tau * 0.37) + 0.08 * Math.sin(tau * 1.1),
+    -0.05 + 0.24 * Math.sin(tau * 0.53 + 1.0),
+    0.38 + 0.14 * Math.sin(tau * 0.29 + 2.0));
+}
+function updateWorm(dt, now) {
+  const speed = 1.0 + 4.0 * Math.exp(-twitchT * 1.5);       // startles when tapped
+  wormClock += dt * speed;
+  const lag = 0.26;
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < WN; i++) {
+    const tau = wormClock - i * lag;
+    const p = wormHead(tau);
+    const tng = wormHead(tau + 0.01).sub(p).normalize();
+    const side = new THREE.Vector3().crossVectors(tng, up).normalize();
+    const f = i / (WN - 1);
+    const wig = Math.sin(i * 0.85 - now * 3.2 * speed) * 0.035 * Math.min(1, f * 3);
+    p.addScaledVector(side, wig).addScaledVector(up, Math.cos(i * 0.6 - now * 2.1) * 0.012);
+    const r = 0.058 * (0.75 + 0.45 * Math.sin(Math.min(1, f * 1.6 + 0.12) * Math.PI)) * (1 - 0.55 * f * f);
+    wormPts[i].set(p.x, p.y, p.z, r);
+  }
+}
+const ripDir = new THREE.Vector3(0, 0, 1);
+let clickIdx = 0;
+function toObjJS(v, now) {
+  const sw = Math.sin(now * 0.13) * 0.18;
+  let c = Math.cos(-0.38), s = Math.sin(-0.38);
+  const x1 = v.x * c - v.y * s, y1 = v.x * s + v.y * c, z1 = v.z;
+  c = Math.cos(sw); s = Math.sin(sw);
+  return new THREE.Vector3(x1 * c - z1 * s, y1, x1 * s + z1 * c);
+}
+// ---- spikes: spawned around a tap, spring out, wobble, then sink back in
+const spikes = [];
+let spSlot = 0;
+const ERADJ = new THREE.Vector3(1.2, 0.93, 0.96);
+function spawnSpikes(dirObj, now) {
+  const up = Math.abs(dirObj.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const t1 = new THREE.Vector3().crossVectors(dirObj, up).normalize();
+  const t2 = new THREE.Vector3().crossVectors(dirObj, t1);
+  const n = 7;
+  for (let i = 0; i < n; i++) {
+    const a = i === 0 ? 0 : (i / (n - 1)) * Math.PI * 2 + Math.random() * 0.6;
+    const r = i === 0 ? 0 : 0.2 + Math.random() * 0.17;
+    const d = dirObj.clone().addScaledVector(t1, Math.cos(a) * r).addScaledVector(t2, Math.sin(a) * r).normalize();
+    const base = d.clone().divideScalar(d.clone().divide(ERADJ).length());          // point on ellipsoid
+    const nrm = base.clone().divide(ERADJ).divide(ERADJ).normalize();
+    const w1 = new THREE.Vector3().crossVectors(nrm, up).normalize(), w2 = new THREE.Vector3().crossVectors(nrm, w1);
+    spikes[spSlot] = {
+      base, nrm, w1, w2, birth: now + i * 0.07 + Math.random() * 0.08,
+      L: 0.17 + Math.random() * 0.07, rh: 0.038 + Math.random() * 0.012, rs: 0.017 + Math.random() * 0.004,
+      col: Math.random() < 0.5 ? 0 : 1, ph: Math.random() * 6.28, ph2: Math.random() * 6.28
+    };
+    spSlot = (spSlot + 1) % NSP;
+  }
+}
+function updateSpikes(now) {
+  for (let j = 0; j < NSP; j++) {
+    const s = spikes[j];
+    if (!s) { spA[j].w = 0; spB[j].w = 0; continue; }
+    const a = now - s.birth;
+    if (a < 0 || a > 8.5) { spA[j].w = 0; spB[j].w = 0; continue; }
+    // springy growth with overshoot, then sink back
+    const grow = (1 - Math.exp(-a * 4.5) * Math.cos(a * 11)) * (1 - smooth(4.2, 7.8, a));
+    const g = Math.max(0, grow);
+    const L = s.L * g;
+    // wobble: strong after popping out, settling into a gentle sway
+    const wob = (Math.exp(-a * 0.9) * 0.55 + 0.12) * L;
+    const ox = Math.sin(a * 7.0 + s.ph) * wob, oy = Math.sin(a * 5.3 + s.ph2) * wob;
+    const root = s.base.clone().addScaledVector(s.nrm, -0.1);
+    const head = s.base.clone().addScaledVector(s.nrm, L).addScaledVector(s.w1, ox).addScaledVector(s.w2, oy);
+    const sz = Math.min(1, g * 1.15);
+    spA[j].set(root.x, root.y, root.z, s.rs * sz);
+    spB[j].set(head.x, head.y, head.z, s.rh * sz);
+    spC[j].set(s.col, sz, 0, 0);
+  }
+}
+function smooth(e0, e1, x) { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+function addPustules(cx, cy) {
+  const now = FIXED_T ?? performance.now() / 1000;
+  const { ro, rd } = rayFor(cx, cy);
+  const R = new THREE.Vector3(1.2, 0.93, 0.96);
+  const o = toObjJS(ro, now).divide(R), d = toObjJS(rd, now).divide(R);
+  const a = d.dot(d), b = o.dot(d), c = o.lengthSq() - 1.05, hh = b * b - a * c;
+  if (hh < 0) return;
+  const tt = (-b - Math.sqrt(hh)) / a;
+  const hit = toObjJS(ro, now).add(toObjJS(rd, now).multiplyScalar(tt)).normalize();
+  spawnSpikes(hit, now);
+}
+function tap(cx, cy) {
+  addPustules(cx, cy);
+  const { ro, rd } = rayFor(cx, cy);
+  const R = new THREE.Vector3(1.2, 0.93, 0.96);
+  const o = ro.clone().divide(R), d = rd.clone().divide(R);   // tilt ignored: close enough for a tap
+  const a = d.dot(d), b = o.dot(d), c = o.lengthSq() - 1.15, hh = b * b - a * c;
+  if (hh < 0) return;
+  const tt = (-b - Math.sqrt(hh)) / a;
+  ripDir.copy(ro).addScaledVector(rd, tt).normalize();
+  ripT = 0; twitchT = 0;
+  audio.poke();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// sound: drone + heartbeat + fluid
+////////////////////////////////////////////////////////////////////////////////
+const BEAT = 1.15;
+const audio = (() => {
+  let ctx = null, master = null, on = false, nextBeat = 0;
+  function build() {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    master.connect(comp).connect(ctx.destination);
+    // reverb-ish
+    const conv = ctx.createConvolver();
+    const len = ctx.sampleRate * 3.2, ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+    conv.buffer = ir;
+    const wet = ctx.createGain(); wet.gain.value = 0.35; conv.connect(wet).connect(master);
+    audio.wet = conv;
+    // drone
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 2;
+    const dg = ctx.createGain(); dg.gain.value = 0.18; lp.connect(dg); dg.connect(master); dg.connect(conv);
+    [55, 82.4, 110.3, 164.6].forEach((f, i) => {
+      const o = ctx.createOscillator(); o.type = i % 2 ? 'triangle' : 'sine'; o.frequency.value = f; o.detune.value = (i - 1.5) * 6;
+      const g = ctx.createGain(); g.gain.value = [0.5, 0.25, 0.18, 0.08][i]; o.connect(g).connect(lp); o.start();
+    });
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07; const lg = ctx.createGain(); lg.gain.value = 220;
+    lfo.connect(lg).connect(lp.frequency); lfo.start();
+    // fluid noise
+    const nb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate), nd = nb.getChannelData(0);
+    let last = 0; for (let i = 0; i < nd.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; nd[i] = last * 3.5; }
+    const ns = ctx.createBufferSource(); ns.buffer = nb; ns.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 300; bp.Q.value = 0.8;
+    const ng = ctx.createGain(); ng.gain.value = 0.35; ns.connect(bp).connect(ng); ng.connect(master); ng.connect(conv); ns.start();
+    const l2 = ctx.createOscillator(); l2.frequency.value = 0.11; const l2g = ctx.createGain(); l2g.gain.value = 160; l2.connect(l2g).connect(bp.frequency); l2.start();
+    nextBeat = ctx.currentTime + 0.3;
+    setInterval(schedule, 60);
+  }
+  function thump(t, f0, amp) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.5, t + 0.18);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(amp, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    o.connect(g); g.connect(master); g.connect(audio.wet); o.start(t); o.stop(t + 0.3);
+  }
+  function blip(t, f, amp) {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine';
+    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.6, t + 0.08);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(amp, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g); g.connect(audio.wet); g.connect(master); o.start(t); o.stop(t + 0.15);
+  }
+  function schedule() {
+    if (!on) return;
+    while (nextBeat < ctx.currentTime + 0.2) {
+      thump(nextBeat, 62, 0.9); thump(nextBeat + 0.27, 54, 0.55);
+      if (Math.random() < 0.6) blip(nextBeat + Math.random() * BEAT, 900 + Math.random() * 1800, 0.035 + Math.random() * 0.03);
+      nextBeat += BEAT;
+    }
+  }
+  return {
+    toggle() {
+      if (!ctx) build();
+      on = !on;
+      if (on) { ctx.resume(); nextBeat = Math.max(nextBeat, ctx.currentTime + 0.05); }
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setTargetAtTime(on ? 0.8 : 0.0, ctx.currentTime, 0.4);
+      return on;
+    },
+    poke() {
+      if (!ctx || !on) return;
+      const t = ctx.currentTime;
+      blip(t, 420, 0.12); blip(t + 0.06, 640, 0.08); thump(t + 0.02, 90, 0.4);
+    },
+    // visual heartbeat in sync with audio when running
+    phase(now) {
+      if (ctx && on) { const ph = ((ctx.currentTime - (nextBeat - BEAT * 4)) % BEAT + BEAT) % BEAT; return ph; }
+      return now % BEAT;
+    }
+  };
+})();
+const soundBtn = document.querySelector('[data-snd]');
+let soundWanted = true, soundOn = false;
+const setSound = (on) => {
+  if (on !== soundOn) soundOn = audio.toggle();
+  soundBtn.setAttribute('aria-pressed', String(soundWanted));
+  soundBtn.textContent = soundWanted ? 'Sound on' : 'Sound off';
+};
+soundBtn.addEventListener('click', (e) => { e.stopPropagation(); soundWanted = !soundWanted; setSound(soundWanted); });
+// browsers only allow audio after a gesture: start it on the first touch/click if wanted
+const firstGesture = (e) => {
+  if (e.target === soundBtn) return;
+  removeEventListener('pointerdown', firstGesture);
+  if (soundWanted && !soundOn) setSound(true);
+};
+addEventListener('pointerdown', firstGesture);
+
+////////////////////////////////////////////////////////////////////////////////
+// loop
+////////////////////////////////////////////////////////////////////////////////
+const env = (x, a, d) => x < 0 ? 0 : x < a ? x / a : Math.exp(-(x - a) / d);
+let last = performance.now();
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000); last = nowMs;
+  const now = FIXED_T ?? nowMs / 1000;
+  uTime.value = now;
+  const sway = FIXED_T === null ? 1 : 0;
+  yaw += (tYaw + Math.sin(now * 0.11) * 0.06 * sway - yaw) * 0.06;
+  pitch += (tPitch + Math.sin(now * 0.083) * 0.035 * sway - pitch) * 0.06;
+  zoom += (tZoom - zoom) * 0.12;
+  uYaw.value = yaw; uPitch.value = pitch; uZoom.value = zoom;
+  const ph = audio.phase(now);
+  uPulse.value = Math.max(env(ph, 0.04, 0.12), 0.6 * env(ph - 0.27, 0.04, 0.12));
+  ripT += dt; twitchT += dt;
+  uRipple.value.set(ripDir.x, ripDir.y, ripDir.z, ripT);
+  const tw = Math.exp(-twitchT * 2.5) * Math.sin(twitchT * 22);
+  uTwitch.value.set(tw * 0.03, tw * 0.02, 0);
+  updateWorm(FIXED_T === null ? dt : 0.016, now);
+  updateSpikes(now);
+  pipeline.render();
+  if (++shown === 3) document.getElementById('loading').classList.add('off');
+  if (MAX_FRAMES && ++frameCount >= MAX_FRAMES) { renderer.setAnimationLoop(null); window.__done = true; }
+}
+// compile the big shader up front (async, keeps the page responsive while "incubating…")
+try { await renderer.compileAsync(scene, cam); } catch (e) { /* first frame will compile instead */ }
+renderer.setAnimationLoop(frame);
+if (Q.has('pust') && FIXED_T !== null) {
+  addPustules(innerWidth * (parseFloat(Q.get('px')) || 0.22), innerHeight * (parseFloat(Q.get('py')) || 0.48));
+  addPustules(innerWidth * 0.62, innerHeight * 0.2);
+  for (const sp of spikes) if (sp) sp.birth -= parseFloat(Q.get('pust') || '1.2');
+}
+window.__ready = true;
+</script>
+</body>
+</html>

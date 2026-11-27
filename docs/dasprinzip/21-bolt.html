@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bolt</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"}}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  color-scheme:dark;
+  --space:#1a1612;
+  --ink:#f1ece4;
+  --ink-soft:rgba(241,236,228,.62);
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+html,body{height:100%}
+body{margin:0;overflow:hidden;color:var(--ink);background:var(--space)}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%;touch-action:none;cursor:grab}
+canvas:active{cursor:grabbing}
+#title-block{position:fixed;top:calc(28px + env(safe-area-inset-top,0px));left:max(28px,env(safe-area-inset-left,0px));z-index:200;pointer-events:none;display:flex;flex-direction:column;gap:16px;text-shadow:0 1px 10px rgba(30,20,10,.35)}
+#title-eyebrow{font:700 14px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+#title-headline{font:500 24px/1 var(--mono);letter-spacing:.02em;white-space:nowrap}
+#title-headline sup{font-size:.38em;vertical-align:super;line-height:0;margin-left:6px;letter-spacing:.06em}
+#title-headline .day{font-size:.55em;vertical-align:baseline;margin-right:.75em;letter-spacing:.04em}
+#title-block p{font:400 9px/1.5 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);margin:0}
+@media (max-width:968px){#title-eyebrow{font-size:12px}#title-headline{font-size:20px}}
+.grain{position:fixed;inset:0;z-index:100;pointer-events:none;opacity:.08;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.tag{position:fixed;z-index:150;left:0;right:0;bottom:calc(18px + env(safe-area-inset-bottom,0px));text-align:center;font:400 11px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);pointer-events:none}
+.loading{position:fixed;z-index:150;inset:0;display:grid;place-items:center;font:400 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);pointer-events:none;transition:opacity .8s}
+.loading.off{opacity:0}
+.picker{position:fixed;z-index:150;left:0;right:0;bottom:calc(44px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;justify-content:center;gap:8px 16px;padding:0 12px;pointer-events:none}
+.picker .grp{display:flex;gap:4px}
+.picker button{pointer-events:auto;font:400 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:rgba(60,45,35,.28);border:1px solid var(--ink-soft);border-radius:999px;padding:7px 12px;cursor:pointer;transition:background .2s,color .2s;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.picker button:hover{background:rgba(60,45,35,.45)}
+.picker button[aria-pressed="true"]{background:var(--ink);color:var(--space);border-color:var(--ink)}
+.picker button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#err{position:fixed;z-index:300;left:12px;right:12px;bottom:90px;font:400 11px/1.4 var(--mono);color:#ffb4a0;white-space:pre-wrap;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="title-block">
+  <span id="title-eyebrow">Codevember 2026</span>
+  <span id="title-headline"><span class="day">Day21</span>Bolt<sup>Clockwork</sup></span>
+  <p>WebGPU · three.js · TSL</p>
+</div>
+<div class="grain"></div>
+<div class="loading" id="loading">oxidising…</div>
+<nav class="picker" id="picker" aria-label="Scene">
+  <div class="grp"><button type="button" data-snd aria-pressed="true">Sound on</button></div>
+</nav>
+<div class="tag">Drag to look around</div>
+<div id="err"></div>
+<script type="module">
+////////////////////////////////////////////////////////////////////////////////
+//// Codevember 2026 · Day21 Bolt (Clockwork)
+////
+//// An endless 3D truchet lattice of spinning hex nuts, eaten by rust.
+//// Raymarched in a single fullscreen TSL pass (three.js WebGPU), rust
+//// texture and pitting live in each nut's own spinning frame, soft shadows,
+//// AO, crisp by default (the original's mip-blur mist with ?mist). Generative sound.
+////
+//// Lattice layout (cells, point-mirroring, gear placement and spin ratios)
+//// ported from "giant clockwork" by florian berger (flockaroo), 2019,
+//// licensed CC BY-NC-SA 3.0 — gears replaced by threaded, chamfered nuts.
+////
+//// This shader may only be shown in this form on shadertoy.com / here.
+//// No use in commercial or non-commercial products or websites.
+//// Not for sale. Not to be minted as an NFT.
+////
+//// Related examples:
+//// - flockaroo (original "giant clockwork"): https://www.shadertoy.com/user/flockaroo
+//// - iq, distance functions (hex prism):     https://iquilezles.org/articles/distfunctions/
+//// - iq, soft shadows:                        https://iquilezles.org/articles/rmshadows/
+////////////////////////////////////////////////////////////////////////////////
+
+import * as THREE from 'three/webgpu';
+import {
+  Fn, uniform, float, vec2, vec3, vec4, Loop, If, Break,
+  dot, cross, normalize, mix, smoothstep, max, min, abs, fract, floor, length, pow, exp, sign, clamp,
+  sin, cos, atan, sqrt, mod, screenUV, convertToTexture, texture, pass, select, step,
+  positionWorld, positionLocal, normalWorld, frontFacing, instanceIndex
+} from 'three/tsl';
+
+const BUILD = 'v0.3.1';
+console.log('%cBolt ' + BUILD, 'color:#e0a070');
+const QS = new URLSearchParams(location.search);
+const errBox = document.getElementById('err');
+const fail = (e) => { errBox.textContent = String(e && e.message || e); console.error(e); };
+window.addEventListener('error', (e) => fail(e.error || e.message));
+
+////////////////////////////////////////////////////////////////
+//// PARAMS
+////////////////////////////////////////////////////////////////
+
+const PI2 = Math.PI * 2;
+const R0 = 0.205;          // pitch radius of the big wheels (from the original)
+const NUT_H = 0.40;        // half thickness, in pitch radii (original gear: .27)
+const NUT_RI = 0.82;       // inradius: sized so neighbours just kiss while turning
+const HOLE = 0.43;         // thread minor radius
+const LOWQ = QS.has('low') || /Android|iPhone|iPad/i.test(navigator.userAgent);
+const STEPS = LOWQ ? 72 : 110;
+
+const uTime = uniform(0);
+const uRes = uniform(new THREE.Vector2(1, 1));
+const uCam = uniform(new THREE.Vector3());
+const uFwd = uniform(new THREE.Vector3(0, 1, 0));
+const uLeft = uniform(new THREE.Vector3(-1, 0, 0));
+const uUp = uniform(new THREE.Vector3(0, 0, 1));
+const LDIR = new THREE.Vector3(0.2, 0.5, 1).normalize();   // world is z-up, like the original
+const uL = uniform(LDIR);
+
+////////////////////////////////////////////////////////////////
+//// NOISE
+////////////////////////////////////////////////////////////////
+
+const hash13 = Fn(([q]) => {
+  const p3 = fract(q.mul(0.1031)).toVar();
+  p3.addAssign(dot(p3, p3.zyx.add(31.32)));
+  return fract(p3.x.add(p3.y).mul(p3.z));
+}).setLayout({ name: 'h13', type: 'float', inputs: [{ name: 'q', type: 'vec3' }] });
+
+const vn = Fn(([x]) => {
+  const i = floor(x);
+  const f = fract(x);
+  const u = f.mul(f).mul(f.mul(-2.0).add(3.0));
+  const a = hash13(i);
+  const b = hash13(i.add(vec3(1, 0, 0)));
+  const c = hash13(i.add(vec3(0, 1, 0)));
+  const d = hash13(i.add(vec3(1, 1, 0)));
+  const e = hash13(i.add(vec3(0, 0, 1)));
+  const g = hash13(i.add(vec3(1, 0, 1)));
+  const h = hash13(i.add(vec3(0, 1, 1)));
+  const k = hash13(i.add(vec3(1, 1, 1)));
+  const z0 = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  const z1 = mix(mix(e, g, u.x), mix(h, k, u.x), u.y);
+  return mix(z0, z1, u.z).mul(2.0).sub(1.0);
+}).setLayout({ name: 'vn', type: 'float', inputs: [{ name: 'x', type: 'vec3' }] });
+
+const fbm4 = Fn(([p]) => {
+  const v = vn(p).mul(0.5).toVar();
+  v.addAssign(vn(p.mul(2.03).add(vec3(1.7, 9.2, 3.1))).mul(0.25));
+  v.addAssign(vn(p.mul(4.01).add(vec3(8.3, 2.8, 6.4))).mul(0.125));
+  v.addAssign(vn(p.mul(8.05).add(vec3(4.1, 7.7, 1.9))).mul(0.0625));
+  return v;
+}).setLayout({ name: 'fbm4', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+
+const fbm3 = Fn(([p]) => {
+  const v = vn(p).mul(0.55).toVar();
+  v.addAssign(vn(p.mul(2.11).add(vec3(5.3, 1.2, 8.8))).mul(0.3));
+  v.addAssign(vn(p.mul(4.37).add(vec3(2.6, 6.1, 3.3))).mul(0.15));
+  return v;
+}).setLayout({ name: 'fbm3', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+
+////////////////////////////////////////////////////////////////
+//// NUT
+////////////////////////////////////////////////////////////////
+
+// hex nut, pitch radius 1: iq hex prism, 30° chamfer cone on both faces,
+// countersunk hole with a single-start thread. w scales the thickness.
+const sdNut = Fn(([q, w]) => {
+  const h = float(NUT_H).mul(w).sub(0.02);
+  const ri = float(NUT_RI - 0.02);
+  const k = vec3(-0.8660254, 0.5, 0.57735);
+  const pa = abs(q);
+  const pxy = pa.xy.sub(k.xy.mul(min(dot(k.xy, pa.xy), 0.0).mul(2.0)));
+  const dx = length(pxy.sub(vec2(clamp(pxy.x, k.z.mul(ri).negate(), k.z.mul(ri)), ri))).mul(sign(pxy.y.sub(ri)));
+  const dz = pa.z.sub(h);
+  const dHex = min(max(dx, dz), 0.0).add(length(max(vec2(dx, dz), 0.0)));
+  const rho = length(q.xy);
+  const dCh = rho.sub(ri.mul(0.985)).mul(0.5).add(pa.z.sub(h).mul(0.866));
+  const d = max(dHex, dCh).sub(0.02).toVar();
+  // thread: radius rides a triangle wave along a helix
+  const th = fract(atan(q.y, q.x).div(PI2).add(q.z.mul(7.0)));
+  const tri = abs(th.sub(0.5)).mul(2.0);
+  const rh = float(HOLE).add(tri.mul(0.055));
+  d.assign(max(d, rh.sub(rho).mul(0.8)));
+  // countersink at the hole mouth
+  d.assign(max(d, float(HOLE + 0.11).add(pa.z).sub(h).sub(rho).mul(0.707)));
+  return d;
+}).setLayout({ name: 'sdNut', type: 'float', inputs: [{ name: 'q', type: 'vec3' }, { name: 'w', type: 'float' }] });
+
+////////////////////////////////////////////////////////////////
+//// LATTICE (after flockaroo's truchetDist / allGears)
+////////////////////////////////////////////////////////////////
+
+// three wheels on a quarter arc, on three perpendicular planes per cell
+const WHEELS = [0, 1, 2].map((i) => {
+  const ang = PI2 / 4 * i / 2;
+  const c2 = -Math.cos(ang * 4) * 0.5 + 0.5;
+  // all nuts the same size and speed (hexes can only stay in contact at 1:1),
+  // the middle one turned 30° so a corner always faces a flat
+  const r = R0;
+  return { i, ang, c2, r, w: 1, spin: (i % 2) * 2 - 1, phase: (i % 2) * PI2 / 12, cx: Math.cos(ang) * 0.5, cy: Math.sin(ang) * 0.5 };
+});
+const PERM = [(p) => p, (p) => vec3(p.z, p.x.negate(), p.y), (p) => vec3(p.y.negate(), p.z.negate(), p.x)];
+const IPERM = [(p) => p, (p) => vec3(p.y.negate(), p.z, p.x), (p) => vec3(p.z, p.x.negate(), p.y.negate())];
+
+// mode 0: distance only · mode 1: vec4(d, local q) · mode 2: vec4(local q, nut id)
+const buildLattice = (pos, mode) => {
+  const mp = floor(mod(pos, 2.0)).mul(2.0).sub(1.0);
+  const s = mp.y.mul(mp.z);                       // fact*mp.x = mp.y*mp.z
+  const st = mp.x.mul(0.5).add(0.5);              // sin(tilt): tilt is 0 or 90°
+  const ct = st.oneMinus();
+  const p0 = pos.mul(s);
+  const best = float(1e3).toVar();
+  const out = vec4(0).toVar();
+  for (const W of WHEELS) {
+    const sh = float(W.c2 * 0.05).mul(ct.mul(ct).mul(0.5).add(0.5));
+    const pc = vec3(float(W.cx).sub(sh.mul(Math.cos(W.ang))), float(W.cy).sub(sh.mul(Math.sin(W.ang))), st.mul(st).mul(W.c2 * 0.02));
+    const ga = uTime.mul(W.spin).add(W.phase);
+    const cg = cos(ga), sg = sin(ga);
+    const ca = Math.cos(-W.ang), sa = Math.sin(-W.ang);
+    for (let k = 0; k < 3; k++) {
+      const pp = PERM[k](p0);
+      const q0 = fract(pp).sub(vec3(0, 0, 0.5)).sub(pc);
+      // Rz(-ang)
+      const q1 = vec3(q0.x.mul(ca).sub(q0.y.mul(sa)), q0.x.mul(sa).add(q0.y.mul(ca)), q0.z);
+      // Ry(tilt)
+      const q2 = vec3(q1.x.mul(ct).add(q1.z.mul(st)), q1.y, q1.z.mul(ct).sub(q1.x.mul(st)));
+      // Rz(spin)
+      const q = vec3(q2.x.mul(cg).sub(q2.y.mul(sg)), q2.x.mul(sg).add(q2.y.mul(cg)), q2.z).div(W.r);
+      const d = sdNut(q, float(W.w)).mul(W.r);
+      if (mode === 0) { best.assign(min(best, d)); continue; }
+      If(d.lessThan(best), () => {
+        best.assign(d);
+        if (mode === 1) out.assign(vec4(d, q));
+        else {
+          const cw = IPERM[k](floor(pp).add(pc).add(vec3(0, 0, 0.5))).mul(s);
+          out.assign(vec4(q, hash13(floor(cw.mul(16.0).add(0.5)).add(vec3(3.1, 7.7, 1.3)))));
+        }
+      });
+    }
+  }
+  return mode === 0 ? best : out;
+};
+
+const map = Fn(([p]) => buildLattice(p, 0)).setLayout({ name: 'map', type: 'float', inputs: [{ name: 'p', type: 'vec3' }] });
+const mapDQ = Fn(([p]) => buildLattice(p, 1)).setLayout({ name: 'mapDQ', type: 'vec4', inputs: [{ name: 'p', type: 'vec3' }] });
+const mapID = Fn(([p]) => buildLattice(p, 2)).setLayout({ name: 'mapID', type: 'vec4', inputs: [{ name: 'p', type: 'vec3' }] });
+
+////////////////////////////////////////////////////////////////
+//// RUST
+////////////////////////////////////////////////////////////////
+
+// texture space: the two halves of a nut that straddles a cell face see it
+// point- or z-mirrored, so fold z and square the xy angle (2-fold symmetric)
+const rustUV = Fn(([q, id]) => {
+  // z² is conformal, so the noise stays isotropic (scale grows a bit outward)
+  const uv2 = vec2(q.x.mul(q.x).sub(q.y.mul(q.y)), q.x.mul(q.y).mul(2.0)).mul(1.3);
+  return vec3(uv2, abs(q.z)).add(vec3(id.mul(37.0), id.mul(91.0), id.mul(13.0)));
+}).setLayout({ name: 'rustUV', type: 'vec3', inputs: [{ name: 'q', type: 'vec3' }, { name: 'id', type: 'float' }] });
+
+// height of the crust: lumps, pits and raised scale plates
+const rustH = Fn(([t]) => {
+  const lump = fbm4(t.mul(2.6));
+  // blisters: rounded bubbles of crust
+  const bl = vn(t.mul(7.0).add(3.0)).abs().oneMinus();
+  const blister = bl.mul(bl).mul(bl).mul(smoothstep(-0.1, 0.4, vn(t.mul(1.7))));
+  // pits eaten into the metal
+  const pit = smoothstep(0.7, 0.92, vn(t.mul(11.0)).mul(0.5).add(0.5));
+  // scale plates with a sharp, lifted edge
+  const pn = fbm3(t.mul(2.4).add(11.0));
+  const plate = smoothstep(0.08, 0.105, pn).add(smoothstep(0.10, 0.08, pn.sub(0.03)).mul(smoothstep(0.06, 0.08, pn)).mul(0.6));
+  const grain = vn(t.mul(26.0)).mul(0.18);
+  return lump.mul(1.0).add(blister.mul(0.7)).sub(pit.mul(0.9)).add(plate.mul(0.55)).add(grain);
+}).setLayout({ name: 'rustH', type: 'float', inputs: [{ name: 't', type: 'vec3' }] });
+
+////////////////////////////////////////////////////////////////
+//// SCENE
+////////////////////////////////////////////////////////////////
+
+const FOG_A = vec3(0.50, 0.46, 0.43);   // haze away from the sun
+const FOG_B = vec3(1.10, 0.95, 0.76);   // haze toward the sun
+
+const sky = Fn(([rd]) => {
+  const sd = dot(rd, uL);
+  const c = mix(FOG_A, FOG_B, smoothstep(-0.4, 1.0, sd)).toVar();
+  c.mulAssign(rd.z.mul(0.12).add(0.95));
+  return c;
+}).setLayout({ name: 'sky', type: 'vec3', inputs: [{ name: 'rd', type: 'vec3' }] });
+
+const softShadow = Fn(([ro, rd]) => {
+  const res = float(1).toVar();
+  const t = float(0.012).toVar();
+  Loop(LOWQ ? 14 : 22, () => {
+    const h = map(ro.add(rd.mul(t)));
+    res.assign(min(res, h.mul(10.0).div(t)));
+    t.addAssign(clamp(h, 0.01, 0.12));
+    If(res.lessThan(0.02).or(t.greaterThan(1.6)), () => { Break(); });
+  });
+  return clamp(res, 0.0, 1.0);
+}).setLayout({ name: 'shadow', type: 'float', inputs: [{ name: 'ro', type: 'vec3' }, { name: 'rd', type: 'vec3' }] });
+
+const rayDir = () => {
+  const asp = uRes.y.div(uRes.x);
+  const sc = vec2(screenUV.x.sub(0.5), screenUV.y.oneMinus().sub(0.5).mul(asp));
+  return normalize(uFwd.add(uLeft.mul(sc.x.mul(2.0))).add(uUp.mul(sc.y.mul(2.0))));
+};
+
+const render = Fn(() => {
+  const rd = rayDir().toVar();
+  const ro = uCam;
+  const t = float(0).toVar();
+  const hit = float(0).toVar();
+  Loop(STEPS, () => {
+    const d = map(ro.add(rd.mul(t)));
+    If(d.lessThan(t.mul(0.0007).add(0.0012)), () => { hit.assign(1); Break(); });
+    t.addAssign(d.mul(0.72));
+    If(t.greaterThan(22.0), () => { Break(); });
+  });
+  const bg = sky(rd);
+  const col = vec3(bg).toVar();
+  If(hit.greaterThan(0.5), () => {
+    const p = ro.add(rd.mul(t)).toVar();
+    // geometric normal
+    const e = float(0.0009).add(t.mul(0.0004));
+    const k0 = vec3(1, -1, -1), k1 = vec3(-1, -1, 1), k2 = vec3(-1, 1, -1), k3 = vec3(1, 1, 1);
+    const id4 = mapID(p);
+    const nid = id4.w;
+    // bump: crust height in the nut's own spinning frame, folded into the gradient
+    const bAmp = float(0.0065).div(t.mul(0.35).add(1.0));
+    const F = (o) => { const dq = mapDQ(p.add(o.mul(e))); return dq.x.sub(rustH(rustUV(dq.yzw, nid)).mul(bAmp)); };
+    const n = normalize(k0.mul(F(k0)).add(k1.mul(F(k1))).add(k2.mul(F(k2))).add(k3.mul(F(k3)))).toVar();
+    const tq = rustUV(id4.xyz, nid);
+    const hgt = rustH(tq);
+    const cav = smoothstep(-0.9, 0.5, hgt);   // low = dark wet rust, high = dry crust
+    // ---- albedo
+    const tone = fbm4(tq.mul(3.2)).mul(0.5).add(0.5);
+    const deep = vec3(0.20, 0.085, 0.04), mid = vec3(0.52, 0.22, 0.075), hot = vec3(0.80, 0.40, 0.12);
+    const rust = mix(deep, mid, smoothstep(0.25, 0.6, tone)).toVar();
+    rust.assign(mix(rust, hot, smoothstep(0.55, 0.85, tone.add(vn(tq.mul(22.0)).mul(0.18)))));
+    rust.mulAssign(vn(tq.mul(24.0)).mul(0.15).add(0.93));
+    rust.mulAssign(cav.mul(0.5).add(0.62));
+    const plateN = fbm3(tq.mul(2.4).add(11.0));
+    const plate = smoothstep(0.08, 0.16, plateN).mul(smoothstep(-0.2, 0.3, fbm3(tq.mul(1.1).add(4.0)))).toVar();
+    plate.mulAssign(hash13(vec3(nid.mul(97.0), 1, 2)).mul(0.7).add(0.45));
+    const pale = mix(vec3(0.58, 0.54, 0.48), vec3(0.80, 0.76, 0.70), vn(tq.mul(9.0)).mul(0.5).add(0.5));
+    const stain = smoothstep(0.0, 0.5, vn(tq.mul(6.0).add(2.0)));
+    const scale = mix(pale, mid.mul(1.3), stain.mul(0.45));
+    const alb = mix(rust, scale, clamp(plate, 0.0, 1.0)).toVar();
+    // a few nuts are younger: darker, less orange, more bare steel
+    const young = smoothstep(0.82, 0.95, hash13(vec3(nid.mul(53.0), 5, 9)));
+    alb.assign(mix(alb, mix(vec3(0.10, 0.09, 0.085), alb, 0.45), young.mul(0.7)));
+    // threads and hole carry darker, wetter rust
+    const rho = length(id4.xy);
+    const inHole = smoothstep(HOLE + 0.14, HOLE + 0.04, rho);
+    alb.mulAssign(mix(1.0, 0.55, inHole));
+    // rubbed band on the flats, where the neighbours keep knocking the crust off
+    const zq = abs(id4.z);
+    const scrape = smoothstep(NUT_RI - 0.03, NUT_RI + 0.02, rho).mul(smoothstep(NUT_H * 0.85, NUT_H * 0.25, zq))
+      .mul(smoothstep(-0.15, 0.45, vn(vec3(id4.z.mul(38.0), nid.mul(31.0), rho.mul(3.0))).add(fbm3(tq.mul(3.0)).mul(0.6)))).toVar();
+    const steel = mix(vec3(0.20, 0.19, 0.185), vec3(0.42, 0.40, 0.38), vn(vec3(id4.z.mul(90.0), nid, 1)).mul(0.5).add(0.5));
+    alb.assign(mix(alb, mix(steel, alb.mul(0.8), 0.25), scrape));
+    const rough = mix(0.88, 0.62, plate).sub(young.mul(0.25)).sub(scrape.mul(0.42));
+    // ---- light
+    const ao = float(1).toVar();
+    ao.assign(min(ao, map(p.add(n.mul(0.08))).div(0.08)));
+    ao.assign(min(ao, map(p.add(n.mul(0.04))).div(0.04)));
+    ao.assign(min(ao, map(p.add(n.mul(0.02))).div(0.02)));
+    ao.assign(clamp(ao, 0.0, 1.0).mul(0.8).add(0.2));
+    const L = uL;
+    const ndl = clamp(dot(n, L), 0.0, 1.0);
+    const sh = softShadow(p.add(n.mul(0.004)), L);
+    const V = rd.negate();
+    const H = normalize(L.add(V));
+    const ndh = clamp(dot(n, H), 0.0, 1.0);
+    const a2 = rough.mul(rough).mul(rough).mul(rough);
+    const dn = ndh.mul(ndh).mul(a2.sub(1.0)).add(1.0);
+    const ggx = a2.div(dn.mul(dn).mul(3.14159));
+    const fre = pow(clamp(dot(n, V).oneMinus(), 0.0, 1.0), 5.0);
+    const F0 = mix(vec3(0.045), vec3(0.55, 0.52, 0.5), max(young.mul(0.6), scrape.mul(0.75)));
+    const spec = F0.add(F0.oneMinus().mul(fre)).mul(ggx).mul(ndl).mul(0.25);
+    const sun = vec3(1.1, 1.0, 0.88).mul(1.9);
+    const hemi = mix(vec3(0.30, 0.22, 0.17), vec3(0.62, 0.62, 0.64), n.z.mul(0.5).add(0.5));
+    const bounce = clamp(dot(n, L.negate()), 0.0, 1.0).mul(vec3(0.30, 0.15, 0.07));
+    const c = alb.mul(sun.mul(ndl).mul(sh).add(hemi.mul(ao)).add(bounce.mul(ao))).toVar();
+    c.addAssign(spec.mul(sun).mul(sh));
+    // dull reflection of the haze, mostly at grazing angles
+    c.addAssign(sky(normalize(rd.sub(n.mul(dot(rd, n).mul(2.0))))).mul(fre.mul(0.35).add(0.03)).mul(ao).mul(plate.mul(0.5).add(young).add(scrape).add(0.25)));
+    // depth fog, like the original (1/7) but a touch denser
+    col.assign(mix(bg, c, exp(t.div(-7.0))));
+  });
+  // alpha carries the ray distance, so the flakes can be depth-tested later
+  return vec4(col, select(hit.greaterThan(0.5), t, float(1e4)));
+});
+
+////////////////////////////////////////////////////////////////
+//// RENDERER
+////////////////////////////////////////////////////////////////
+
+const renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: QS.has('webgl') });
+const PR = parseFloat(QS.get('scale')) || Math.min(window.devicePixelRatio, LOWQ ? 1 : 1.5);
+renderer.setPixelRatio(PR);
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+
+// "mist": the original blends three blurred mip levels of the frame
+const scene = convertToTexture(render(), null, null, QS.has('mist') ? { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter } : {});
+const pipe = new THREE.RenderPipeline(renderer);
+// render target with mips, then sample three lods exactly like the original
+const sceneTex = scene.renderTarget.texture;
+// the whole look is authored in display space like the original shader, so
+// skip three's tonemap/sRGB and only roll off the highlights
+const shoulder = Fn(([c]) => c.mul(c.mul(0.25).add(1.0)).div(c.add(1.0)).mul(1.12));
+pipe.outputColorTransform = false;
+const base = QS.has('mist')
+  ? (() => { const lod = (l) => texture(sceneTex, screenUV).level(l).rgb; return scene.rgb.mul(1.5).add(lod(2.5)).add(lod(4.5).mul(0.75)).div(3.25); })()
+  : scene.rgb;
+
+////////////////////////////////////////////////////////////////
+//// FLAKES (rust chips knocked off where the nuts touch)
+////////////////////////////////////////////////////////////////
+
+const NF = LOWQ ? 1200 : 3000;
+const cam3 = new THREE.PerspectiveCamera(60, 1, 0.01, 30);
+cam3.up.set(0, 0, 1);
+const flakeScene = new THREE.Scene();
+renderer.setClearColor(0x000000, 0);
+
+// a jagged, slightly cupped chip
+const flakeGeo = (() => {
+  const g = new THREE.BufferGeometry();
+  const M = 7, pos = [0, 0, 0.12];
+  const rr = [];
+  for (let i = 0; i < M; i++) rr.push(0.55 + Math.sin(i * 2.7) * 0.25 + Math.cos(i * 5.1) * 0.2);
+  for (let i = 0; i < M; i++) { const a = i / M * PI2; pos.push(Math.cos(a) * rr[i], Math.sin(a) * rr[i] * 0.7, 0); }
+  const idx = [];
+  for (let i = 0; i < M; i++) idx.push(0, 1 + i, 1 + (i + 1) % M);
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+})();
+
+const flakeMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+flakeMat.colorNode = Fn(() => {
+  const hId = hash13(vec3(float(instanceIndex), 4.1, 7.3));
+  const hB = hash13(vec3(float(instanceIndex), 9.2, 1.7));
+  const rustC = mix(vec3(0.20, 0.08, 0.03), vec3(0.64, 0.28, 0.08), hId);
+  const ln = vn(positionLocal.mul(5.0).add(vec3(hId.mul(40.0), hB.mul(40.0), 0)));
+  const alb = mix(rustC.mul(ln.mul(0.35).add(0.85)), vec3(0.62, 0.58, 0.52).mul(ln.mul(0.2).add(0.9)), step(0.78, hB))
+    .mul(smoothstep(0.75, 0.3, length(positionLocal.xy)).mul(0.35).add(0.65));
+  const n = normalWorld.mul(select(frontFacing, 1.0, -1.0));
+  const ndl = abs(dot(n, uL)).mul(0.7).add(clamp(dot(n, uL), 0.0, 1.0).mul(0.3));
+  const hemi = mix(vec3(0.30, 0.22, 0.17), vec3(0.62, 0.62, 0.64), n.z.mul(0.5).add(0.5));
+  const c = alb.mul(vec3(1.1, 1.0, 0.88).mul(1.35).mul(ndl).add(hemi.mul(0.85)));
+  const toP = positionWorld.sub(uCam);
+  const dist = length(toP);
+  // inline haze (sharing the layout Fn sky() between both materials stalls the builder)
+  const rd = toP.div(dist);
+  const hz = mix(FOG_A, FOG_B, smoothstep(-0.4, 1.0, dot(rd, uL))).mul(rd.z.mul(0.12).add(0.95));
+  return mix(hz, c, exp(dist.div(-7.0)));
+})();
+const flakes = new THREE.InstancedMesh(flakeGeo, flakeMat, NF);
+flakes.frustumCulled = false;
+flakes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+flakeScene.add(flakes);
+
+const flakePass = pass(flakeScene, cam3);
+const fCol = flakePass.getTextureNode('output');
+const fZ = flakePass.getViewZNode();
+// raymarch distance along the ray -> distance along the view axis
+const rmZ = scene.a.mul(dot(rayDir(), uFwd));
+const vis = fCol.a.mul(step(fZ.negate(), rmZ.add(0.003)));
+const outC = mix(base, fCol.rgb, vis);
+pipe.outputNode = vec4(shoulder(QS.has('noflakes') ? base : outC), 1);
+
+////////////////////////////////////////////////////////////////
+//// SOUND
+////////////////////////////////////////////////////////////////
+
+const snd = (() => {
+  let ctx = null, out, wet, on = true, ready = false, nextTick = 0, nextGroan = 0, nextClank = 0;
+  const noiseBuf = () => {
+    const b = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  };
+  let NB;
+  const noise = (dur) => { const s = ctx.createBufferSource(); s.buffer = NB; s.loopStart = Math.random(); s.start(); s.stop(ctx.currentTime + dur + 0.05); return s; };
+  const init = () => {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    NB = noiseBuf();
+    out = ctx.createGain(); out.gain.value = 0; out.connect(ctx.destination);
+    // big hall: a long noise-burst convolution
+    wet = ctx.createConvolver();
+    const L = ctx.sampleRate * 3.5, ir = ctx.createBuffer(2, L, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < L; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / L, 3.2); }
+    wet.buffer = ir;
+    const wg = ctx.createGain(); wg.gain.value = 0.55; wet.connect(wg).connect(out);
+    // low machine drone: two detuned saws through a slowly moving lowpass
+    const dr = ctx.createGain(); dr.gain.value = 0.05;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; lp.Q.value = 4;
+    [41.2, 41.55, 61.8].forEach((f) => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(lp); o.start(); });
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07; const lg = ctx.createGain(); lg.gain.value = 70; lfo.connect(lg).connect(lp.frequency); lfo.start();
+    lp.connect(dr); dr.connect(out); dr.connect(wet);
+    ready = true;
+  };
+  // escapement tick: short metallic click with two inharmonic partials
+  const tick = (t, hi) => {
+    const s = noise(0.02);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = hi ? 3400 : 2100; bp.Q.value = 9;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    const pn = ctx.createStereoPanner(); pn.pan.value = hi ? 0.35 : -0.35;
+    s.connect(bp).connect(g).connect(pn); pn.connect(out); pn.connect(wet);
+    [hi ? 1870 : 1320, hi ? 4630 : 3310].forEach((f, i) => {
+      const o = ctx.createOscillator(); o.frequency.value = f;
+      const og = ctx.createGain(); og.gain.setValueAtTime(i ? 0.02 : 0.035, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.connect(og).connect(pn); o.start(t); o.stop(t + 0.2);
+    });
+  };
+  // rusty groan: a slow stick-slip — a filtered pulse train whose rate wanders
+  const groan = (t) => {
+    const dur = 1.6 + Math.random() * 1.8;
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    const f0 = 38 + Math.random() * 30;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.linearRampToValueAtTime(f0 * (0.7 + Math.random() * 0.8), t + dur * 0.5);
+    o.frequency.linearRampToValueAtTime(f0 * (0.6 + Math.random() * 0.9), t + dur);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 6;
+    bp.frequency.setValueAtTime(600 + Math.random() * 500, t); bp.frequency.linearRampToValueAtTime(900 + Math.random() * 900, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05, t + 0.3);
+    g.gain.setValueAtTime(0.05, t + dur - 0.4); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const pn = ctx.createStereoPanner(); pn.pan.value = Math.random() * 1.6 - 0.8;
+    o.connect(bp).connect(g).connect(pn); pn.connect(out); pn.connect(wet);
+    o.start(t); o.stop(t + dur + 0.05);
+  };
+  // distant clank: heavy struck iron, mostly reverb
+  const clank = (t) => {
+    const base = 90 + Math.random() * 70;
+    [1, 2.76, 5.4, 8.93].forEach((m, i) => {
+      const o = ctx.createOscillator(); o.frequency.value = base * m;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06 / (i + 1), t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.5 / (i + 1));
+      o.connect(g); g.connect(wet); const dg = ctx.createGain(); dg.gain.value = 0.25; g.connect(dg).connect(out);
+      o.start(t); o.stop(t + 2.6);
+    });
+  };
+  // dry crackle of rust chips letting go
+  const crackle = () => {
+    const n = 4 + (Math.random() * 6 | 0);
+    for (let j = 0; j < n; j++) {
+      const t = ctx.currentTime + 0.01 + Math.random() * 0.25;
+      const s = noise(0.01);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800 + Math.random() * 5000; bp.Q.value = 2.5;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05 + Math.random() * 0.07, t + 0.001); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
+      const pn = ctx.createStereoPanner(); pn.pan.value = Math.random() * 1.6 - 0.8;
+      s.connect(bp).connect(g).connect(pn); pn.connect(out); pn.connect(wet);
+    }
+  };
+  let lastPeak = 0;
+  return {
+    get on() { return on; },
+    chips(T) {
+      if (!ready || !on) return;
+      const k = Math.floor((T * 3) / Math.PI + 0.5);
+      if (k !== lastPeak) { lastPeak = k; crackle(); }
+    },
+    wake() { if (!ctx) init(); if (ctx.state === 'suspended') ctx.resume(); },
+    set(v) { on = v; },
+    tick() {
+      if (!ready) return;
+      const now = ctx.currentTime;
+      out.gain.setTargetAtTime(on ? 0.9 : 0.0, now, 0.3);
+      if (!on) return;
+      // the big wheels turn about once every 6.3 s: tick at a steady 2 Hz, tock alternating
+      if (nextTick < now) nextTick = now + 0.05;
+      while (nextTick < now + 0.12) { tick(nextTick, Math.round(nextTick * 2) % 2 === 0); nextTick += 0.5; }
+      if (now > nextGroan) { groan(now + 0.05); nextGroan = now + 3 + Math.random() * 5; }
+      if (now > nextClank) { clank(now + 0.05); nextClank = now + 6 + Math.random() * 9; }
+    },
+  };
+})();
+
+const sndBtn = document.querySelector('[data-snd]');
+sndBtn.addEventListener('click', () => {
+  snd.wake();
+  snd.set(!snd.on);
+  sndBtn.setAttribute('aria-pressed', String(snd.on));
+  sndBtn.textContent = snd.on ? 'Sound on' : 'Sound off';
+});
+window.addEventListener('pointerdown', () => snd.wake(), { once: true });
+
+////////////////////////////////////////////////////////////////
+//// CAMERA (the original's flight: forward along x, slow yaw / pitch sway)
+////////////////////////////////////////////////////////////////
+
+const look = { yaw: 0, pitch: 0, vy: 0, vp: 0, drag: false, lx: 0, ly: 0 };
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', (e) => { look.drag = true; look.lx = e.clientX; look.ly = e.clientY; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', (e) => {
+  if (!look.drag) return;
+  const dx = (e.clientX - look.lx) / innerWidth, dy = (e.clientY - look.ly) / innerHeight;
+  look.lx = e.clientX; look.ly = e.clientY;
+  look.vy = -dx * 4.0; look.vp = dy * 3.0;
+  look.yaw += look.vy; look.pitch += look.vp;
+});
+const endDrag = () => { look.drag = false; };
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+
+const qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
+const AX_Z = new THREE.Vector3(0, 0, 1), AX_X = new THREE.Vector3(1, 0, 0);
+const _lk = new THREE.Vector3();
+const placeCam = (T, dt) => {
+  if (!look.drag) { look.yaw += look.vy; look.pitch += look.vp; const k = Math.exp(-dt * 3); look.vy *= k; look.vp *= k; }
+  look.pitch = Math.max(-1.4, Math.min(1.4, look.pitch));
+  const phi = T * 0.333 * 0.3 + look.yaw;
+  const th = Math.cos(T * 0.23423 * 0.3) + look.pitch;
+  qa.setFromAxisAngle(AX_Z, phi);
+  qb.setFromAxisAngle(AX_X, th);
+  qa.multiply(qb);
+  uFwd.value.set(0, 1, 0).applyQuaternion(qa);
+  uLeft.value.set(-1, 0, 0).applyQuaternion(qa);
+  uUp.value.set(0, 0, 1).applyQuaternion(qa);
+  uCam.value.set(T * 0.4 - 0.5, 0, 0);
+  cam3.position.copy(uCam.value);
+  cam3.up.copy(uUp.value);
+  cam3.lookAt(_lk.copy(uCam.value).add(uFwd.value));
+};
+
+
+////////////////////////////////////////////////////////////////
+//// FLAKE SIM (CPU: contacts from the same lattice math, then fall)
+////////////////////////////////////////////////////////////////
+
+const permF = [(p) => p, (p) => [p[2], -p[0], p[1]], (p) => [-p[1], -p[2], p[0]]];
+const ipermF = [(p) => p, (p) => [-p[1], p[2], p[0]], (p) => [p[2], -p[0], -p[1]]];
+const cellCache = new Map();
+// world position and surface velocity of every touching pair in one cell
+const cellContacts = (cx, cy, cz) => {
+  const key = cx + ',' + cy + ',' + cz;
+  if (cellCache.has(key)) return cellCache.get(key);
+  const pos = [cx + 0.5, cy + 0.5, cz + 0.5];
+  const mp = pos.map((v) => Math.floor(((v % 2) + 2) % 2) * 2 - 1);
+  const s = mp[1] * mp[2], st = mp[0] * 0.5 + 0.5, ct = 1 - st;
+  const p0 = pos.map((v) => v * s);
+  const out = [];
+  for (let k = 0; k < 3; k++) {
+    const fl = permF[k](p0).map(Math.floor);
+    const C = WHEELS.map((W) => {
+      const sh = W.c2 * 0.05 * (ct * ct * 0.5 + 0.5);
+      const pc = [W.cx - sh * Math.cos(W.ang), W.cy - sh * Math.sin(W.ang), st * st * W.c2 * 0.02];
+      const cw = ipermF[k]([fl[0] + pc[0], fl[1] + pc[1], fl[2] + pc[2] + 0.5]).map((v) => v * s);
+      const c = Math.cos(-W.ang), sn = Math.sin(-W.ang);
+      const M = (v) => {
+        let a = permF[k](v.map((x) => x * s));
+        a = [a[0] * c - a[1] * sn, a[0] * sn + a[1] * c, a[2]];
+        return [a[0] * ct + a[2] * st, a[1], a[2] * ct - a[0] * st];
+      };
+      const cols = [M([1, 0, 0]), M([0, 1, 0]), M([0, 0, 1])];
+      return { cw, M, cols, spin: W.spin };
+    });
+    for (const [a, b] of [[0, 1], [1, 2]]) {
+      const A = C[a], B = C[b];
+      const mid = [0, 1, 2].map((j) => (A.cw[j] + B.cw[j]) * 0.5);
+      const q2 = A.M(mid.map((v, j) => v - A.cw[j]));
+      const vq = [A.spin * q2[1], -A.spin * q2[0], 0];
+      const vw = A.cols.map((col) => col[0] * vq[0] + col[1] * vq[1] + col[2] * vq[2]);
+      const ax = [A.cols[0][2], A.cols[1][2], A.cols[2][2]];
+      out.push({ p: mid, v: vw, a: ax });
+    }
+  }
+  if (cellCache.size > 4000) cellCache.clear();
+  cellCache.set(key, out);
+  return out;
+};
+
+let contacts = [], contactAge = 99;
+const gatherContacts = () => {
+  const c = uCam.value, f = uFwd.value, R = 2;
+  const list = [];
+  const bx = Math.floor(c.x), by = Math.floor(c.y), bz = Math.floor(c.z);
+  for (let x = -R; x <= R; x++) for (let y = -R; y <= R; y++) for (let z = -R; z <= R; z++) {
+    for (const ct of cellContacts(bx + x, by + y, bz + z)) {
+      const dx = ct.p[0] - c.x, dy = ct.p[1] - c.y, dz = ct.p[2] - c.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 0.3 || d > 2.4) continue;
+      if ((dx * f.x + dy * f.y + dz * f.z) / d < 0.35) continue;
+      list.push(ct);
+    }
+  }
+  contacts = list;
+};
+
+// the same nuts on the CPU (no thread), so chips can land, bounce and slide off
+const nutJS = (x, y, z, h) => {
+  const ri = NUT_RI;
+  let px = Math.abs(x), py = Math.abs(y); const pz = Math.abs(z);
+  const t = 2 * Math.min(-0.8660254 * px + 0.5 * py, 0); px -= t * -0.8660254; py -= t * 0.5;
+  const cx = Math.max(-0.57735 * ri, Math.min(0.57735 * ri, px));
+  const dx = Math.hypot(px - cx, py - ri) * Math.sign(py - ri), dz = pz - h;
+  let d = Math.min(Math.max(dx, dz), 0) + Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
+  const rho = Math.hypot(x, y);
+  d = Math.max(d, (rho - ri * 0.985) * 0.5 + dz * 0.866);
+  return Math.max(d, HOLE + 0.03 - rho);
+};
+const latticeJS = (X, Y, Z, T) => {
+  const pos = [X, Y, Z];
+  const mp = pos.map((v) => Math.floor(((v % 2) + 2) % 2) * 2 - 1);
+  const s = mp[1] * mp[2], st = mp[0] * 0.5 + 0.5, ct = 1 - st;
+  const p0 = [X * s, Y * s, Z * s];
+  let best = 1e3;
+  for (const W of WHEELS) {
+    const sh = W.c2 * 0.05 * (ct * ct * 0.5 + 0.5);
+    const pcx = W.cx - sh * Math.cos(W.ang), pcy = W.cy - sh * Math.sin(W.ang), pcz = st * st * W.c2 * 0.02;
+    const ga = T * W.spin + W.phase, cg = Math.cos(ga), sg = Math.sin(ga);
+    const ca = Math.cos(-W.ang), sa = Math.sin(-W.ang);
+    for (let k = 0; k < 3; k++) {
+      const pp = permF[k](p0);
+      const q0x = pp[0] - Math.floor(pp[0]) - pcx, q0y = pp[1] - Math.floor(pp[1]) - pcy, q0z = pp[2] - Math.floor(pp[2]) - 0.5 - pcz;
+      const q1x = q0x * ca - q0y * sa, q1y = q0x * sa + q0y * ca;
+      const q2x = q1x * ct + q0z * st, q2z = q0z * ct - q1x * st;
+      const qx = (q2x * cg - q1y * sg) / W.r, qy = (q2x * sg + q1y * cg) / W.r, qz = q2z / W.r;
+      if (qx * qx + qy * qy + qz * qz > 2.2) continue;
+      best = Math.min(best, nutJS(qx, qy, qz, NUT_H) * W.r);
+    }
+  }
+  return best;
+};
+
+const FL = {
+  pos: new Float32Array(NF * 3), vel: new Float32Array(NF * 3), life: new Float32Array(NF),
+  size: new Float32Array(NF), q: Array.from({ length: NF }, () => new THREE.Quaternion()),
+  w: Array.from({ length: NF }, () => new THREE.Vector3()), next: 0, acc: 0,
+};
+const _m = new THREE.Matrix4(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _dq = new THREE.Quaternion(), _ax = new THREE.Vector3();
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+for (let i = 0; i < NF; i++) flakes.setMatrixAt(i, ZERO);
+const RATE = QS.has('flakes') ? parseFloat(QS.get('flakes')) : (LOWQ ? 260 : 650);
+const spawn = (ct) => {
+  const i = FL.next; FL.next = (FL.next + 1) % NF;
+  const r = () => Math.random() * 2 - 1;
+  const k = 0.5 + Math.random() * 0.9;
+  // chips break off at the rim of either face, right where the two nuts meet
+  const side = (Math.random() < 0.5 ? -1 : 1) * (NUT_H * R0 + 0.006);
+  for (let j = 0; j < 3; j++) {
+    FL.pos[i * 3 + j] = ct.p[j] + ct.a[j] * side + r() * 0.01;
+    FL.vel[i * 3 + j] = ct.v[j] * k + r() * 0.05;
+  }
+  FL.life[i] = 3.5 + Math.random() * 3;
+  const u = Math.random();
+  FL.size[i] = 0.015 + u * u * u * 0.065;
+  FL.q[i].setFromEuler(new THREE.Euler(Math.random() * 6.3, Math.random() * 6.3, Math.random() * 6.3));
+  FL.w[i].set(r(), r(), r()).multiplyScalar(6 + Math.random() * 10);
+};
+const updateFlakes = (dt, T) => {
+  contactAge += dt;
+  if (contactAge > 0.25) { contactAge = 0; gatherContacts(); }
+  // chips come loose in bursts each time a corner rolls over a flat (6x per turn)
+  const burst = 0.45 + 0.55 * Math.pow(Math.abs(Math.sin(T * 3)), 4);
+  FL.acc += dt * RATE * burst;
+  while (FL.acc >= 1) { FL.acc -= 1; if (contacts.length) spawn(contacts[(Math.random() * contacts.length) | 0]); }
+  const drag = Math.exp(-dt * 1.4);
+  for (let i = 0; i < NF; i++) {
+    if (FL.life[i] <= 0) continue;
+    FL.life[i] -= dt;
+    if (FL.life[i] <= 0) { flakes.setMatrixAt(i, ZERO); continue; }
+    const o = i * 3;
+    // gravity, air drag and a little side-to-side flutter like a falling leaf
+    FL.vel[o + 2] -= 0.42 * dt;
+    FL.vel[o] = FL.vel[o] * drag + Math.sin(T * 5.3 + i) * 0.09 * dt;
+    FL.vel[o + 1] = FL.vel[o + 1] * drag + Math.cos(T * 4.1 + i * 1.7) * 0.09 * dt;
+    FL.vel[o + 2] *= drag;
+    FL.pos[o] += FL.vel[o] * dt; FL.pos[o + 1] += FL.vel[o + 1] * dt; FL.pos[o + 2] += FL.vel[o + 2] * dt;
+    // land on a nut: push out along the gradient, lose most of the speed
+    const rad = FL.size[i] * 0.35;
+    const d = latticeJS(FL.pos[o], FL.pos[o + 1], FL.pos[o + 2], T);
+    if (d < rad) {
+      const e = 0.003;
+      let nx = latticeJS(FL.pos[o] + e, FL.pos[o + 1], FL.pos[o + 2], T) - d;
+      let ny = latticeJS(FL.pos[o], FL.pos[o + 1] + e, FL.pos[o + 2], T) - d;
+      let nz = latticeJS(FL.pos[o], FL.pos[o + 1], FL.pos[o + 2] + e, T) - d;
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      const push = Math.min(rad - d, 0.02);
+      FL.pos[o] += nx * push; FL.pos[o + 1] += ny * push; FL.pos[o + 2] += nz * push;
+      const vn = FL.vel[o] * nx + FL.vel[o + 1] * ny + FL.vel[o + 2] * nz;
+      if (vn < 0) { FL.vel[o] -= nx * vn * 1.25; FL.vel[o + 1] -= ny * vn * 1.25; FL.vel[o + 2] -= nz * vn * 1.25; }
+      FL.vel[o] *= 0.82; FL.vel[o + 1] *= 0.82; FL.vel[o + 2] *= 0.82;
+      FL.w[i].multiplyScalar(0.8);
+    }
+    const wl = FL.w[i].length();
+    _dq.setFromAxisAngle(_ax.copy(FL.w[i]).divideScalar(wl || 1), wl * dt);
+    FL.q[i].premultiply(_dq);
+    const fade = Math.min(1, FL.life[i] * 2);
+    _s.setScalar(FL.size[i] * fade);
+    _m.compose(_p.set(FL.pos[o], FL.pos[o + 1], FL.pos[o + 2]), FL.q[i], _s);
+    flakes.setMatrixAt(i, _m);
+  }
+  flakes.instanceMatrix.needsUpdate = true;
+};
+// warm up so the air is already full of chips when the page opens
+const warm = (T) => { for (let j = 0; j < 90; j++) { placeCam(T - 3 + j / 30, 1 / 30); updateFlakes(1 / 30, T - 3 + j / 30); } };
+
+////////////////////////////////////////////////////////////////
+//// LOOP
+////////////////////////////////////////////////////////////////
+
+const fit = () => {
+  renderer.setSize(innerWidth, innerHeight); uRes.value.set(innerWidth, innerHeight);
+  // the raymarch frame spans ±1 horizontally: 90° wide
+  cam3.aspect = innerWidth / innerHeight;
+  cam3.fov = 2 * Math.atan(innerHeight / innerWidth) * 180 / Math.PI;
+  cam3.updateProjectionMatrix();
+};
+window.addEventListener('resize', fit);
+fit();
+
+const T0 = parseFloat(QS.get('t')) || 6;
+const clock = new THREE.Timer();
+let tt = 0, first = true;
+renderer.init().then(() => {
+  renderer.setAnimationLoop(() => {
+    clock.update();
+    const dt = QS.has('freeze') ? 0 : Math.min(clock.getDelta(), 0.05);
+    tt += dt;
+    const T = T0 + tt;
+    uTime.value = T;
+    placeCam(T, dt);
+    if (first) warm(T);
+    updateFlakes(dt, T);
+    snd.tick();
+    snd.chips(T);
+    pipe.render();
+    if (first) { first = false; document.getElementById('loading').classList.add('off'); window.__ready = true; }
+  });
+}).catch(fail);
+</script>
+</body>
+</html>

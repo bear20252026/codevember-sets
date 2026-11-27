@@ -1,0 +1,23 @@
+# 直达链接
+02	Shatter.	https://dasprinzip.com/codevember2026/02-shatter.html
+06	Orrery.	https://dasprinzip.com/codevember2026/06-orrery.html
+07	Hollow.	https://dasprinzip.com/codevember2026/07-hollow.html
+08	Tesseract.	https://dasprinzip.com/codevember2026/08-tesseract.html
+09	Membrane.	https://dasprinzip.com/codevember2026/09-membrane.html
+10	Caustic.	https://dasprinzip.com/codevember2026/10-caustic.html
+11	Rust.	https://dasprinzip.com/codevember2026/11-rust.html
+12	Feather.	https://dasprinzip.com/codevember2026/12-feather.html
+13	Labyrinth	https://dasprinzip.com/codevember2026/13-labyrinth.html
+14	Tension.	https://dasprinzip.com/codevember2026/14-tension.html
+15	Mirage.	https://dasprinzip.com/codevember2026/15-mirage.html
+16	Spore.	https://dasprinzip.com/codevember2026/16-spore.html
+17	Kelp.	https://dasprinzip.com/codevember2026/17-kelp.html
+18	Pendulum.	https://dasprinzip.com/codevember2026/18-pendulum.html
+19	Erosion	https://dasprinzip.com/codevember2026/19-erosion.html
+20	Cocoon.	https://dasprinzip.com/codevember2026/20-cocoon.html
+21	Bolt	https://dasprinzip.com/codevember2026/21-bolt.html
+22	Echo.	https://dasprinzip.com/codevember2026/22-echo.html
+23	Magma	https://dasprinzip.com/codevember2026/23-magma.html
+24	Nest.	https://dasprinzip.com/codevember2026/24-nest.html
+25	Veil.	https://dasprinzip.com/codevember2026/25-veil.html
+26	Anamorph	https://dasprinzip.com/codevember2026/26-anamorph.html
