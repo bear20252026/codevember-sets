@@ -17,7 +17,7 @@ A parallel repository to [`nodevember`](https://github.com/bear20252026/nodevemb
 - `spite/` — Spite's full source tree: 26 day folders, shared modules, assets, screenshots and gallery.
 - `theo/` — Theo Tillberg's full source tree: 18 piece folders, 17 listed dates, build scripts, template, docs and assets. `dist/` and `node_modules/` are not committed.
 - `dasprinzip/` — Frank Reitberger's public source archive: 22 original HTML pages, extracted JS/CSS/importmaps, and the two base64-embedded Day 16 pages decoded under `embedded/`.
-- `docs/` — the assembled GitHub Pages site: landing page, `spite/`, `theo/`, `dasprinzip/` and `similar.html`.
+- `site/` — the generated GitHub Pages site: landing page, `spite/`, `theo/`, `dasprinzip/` and `similar.html`. It is built locally and uploaded as a Pages artifact; it is not committed.
 - `SIMILAR.md` and `data/similar-repos.json` — the 2026 similar-repository survey, filtered to sets under 1 GB that are not yet full 30/30.
 
 ## Similar repositories (2026-11-27)
@@ -38,7 +38,7 @@ The default base remains upstream when the variable is unset.
 
 ## Publishing
 
-GitHub Pages is set to `main / docs`. `docs/` is the assembled site: `index.html`, `assets/`, `spite/`, `theo/`, `dasprinzip/` and `similar.html`. Rebuild Theo, then copy `theo/dist` into `docs/theo` and refresh the landing page/assets when they change.
+GitHub Pages is deployed from the `site/` artifact by `.github/workflows/pages.yml`. The workflow type-checks Theo, builds `theo/dist`, assembles `site/`, smoke-tests all page roots and local links, then publishes. `docs/` is no longer the deployment source.
 
 No build is needed for Das Prinzip: the pages are already self-contained. They load `three@0.186.1` from jsDelivr, so the live pages need network access for the Three.js modules.
 
@@ -52,7 +52,7 @@ No build is needed for Das Prinzip: the pages are already self-contained. They l
 
 Spite and Theo Tillberg are MIT licensed; their `LICENSE` files are kept in each folder. Authors retain copyright. This repository is an attributed mirror, not a relicense.
 
-Das Prinzip's pages carry no licence notice. They remain the author's copyright; this repository mirrors publicly accessible pages for research and archival reference only, with no relicense. Remove or replace on the author's request.
+Das Prinzip's pages carry **no open-source licence**. They remain Frank Reitberger's copyright. Two pages (`21-bolt`, `25-veil`) explicitly restrict use and redistribution; see [`LICENSE-DAS.md`](./LICENSE-DAS.md). This repository mirrors publicly accessible pages for research and archival reference only, with no relicense. Remove or replace on the author's request.
 
 ## Upstream
 
@@ -64,4 +64,4 @@ Das Prinzip's pages carry no licence notice. They remain the author's copyright;
 
 这是 `nodevember` 的平行仓库，现在放三套：Spite 的 26 天、Theo Tillberg 的 18 件，以及 Frank Reitberger（Das Prinzip）的 22 页单文件源码。Spite / Theo 是 MIT，原始 `LICENSE` 保留；Das Prinzip 没有许可证，只按公开页面做研究性镜像，版权归作者。
 
-三套都放在 1 GB 以内；新增 Das Prinzip 后，源码目录约 51 MB，`docs/` 站点约 200 MB，整库检出约 558 MB（不含 node_modules），git 对象约 193 MB。相似仓库清单见 `SIMILAR.md` 和 `docs/similar.html`。
+三套都放在 1 GB 以内；新增 Das Prinzip 后，源码目录约 51 MB，`site/` 生成站点约 200 MB，整库检出约 558 MB（不含 node_modules），git 对象约 193 MB。相似仓库清单见 `SIMILAR.md` 和 `similar.html`。
