@@ -15,7 +15,7 @@ A parallel repository to [`nodevember`](https://github.com/bear20252026/nodevemb
 ## What is here
 
 - `spite/` — Spite's full source tree: 26 day folders, shared modules, assets, screenshots and gallery.
-- `theo/` — Theo Tillberg's full source tree: 18 piece folders across 17 dates, build scripts, template, docs and assets. `dist/` and `node_modules/` are not committed.
+- `theo/` — Theo Tillberg's full source tree: 18 piece folders, 17 listed dates, build scripts, template, docs and assets. `dist/` and `node_modules/` are not committed.
 - `dasprinzip/` — Frank Reitberger's public source archive: 22 original HTML pages, extracted JS/CSS/importmaps, and the two base64-embedded Day 16 pages decoded under `embedded/`.
 - `docs/` — the assembled GitHub Pages site: landing page, `spite/`, `theo/`, `dasprinzip/` and `similar.html`.
 - `SIMILAR.md` and `data/similar-repos.json` — the 2026 similar-repository survey, filtered to sets under 1 GB that are not yet full 30/30.
