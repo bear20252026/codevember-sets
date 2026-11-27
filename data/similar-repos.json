@@ -147,12 +147,12 @@
     },
     {
       "name": "bear/codevember-sets（本仓库）",
-      "days": "2 套合集",
-      "size": "156.4 MB（GitHub 体积）",
+      "days": "3 套合集",
+      "size": "200 MB docs",
       "size_kb": 160190,
       "license": "Spite/Theo MIT；Das 无",
       "repo": "https://github.com/bear20252026/codevember-sets",
-      "note": "Spite 25 + Theo 16 的合集；本轮加入 Das Prinzip 22 页。"
+      "note": "Spite 26 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。"
     },
     {
       "name": "zhulin025/codevember-archive",

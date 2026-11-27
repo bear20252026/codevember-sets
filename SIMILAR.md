@@ -35,7 +35,7 @@
 ## 边界案例
 
 - **Keaukraine** — 30 个目录全是 “Nothing here” 占位，属于“没装满”的反例。 · [仓库](https://github.com/keaukraine/codevember-2026)
-- **bear/codevember-sets（本仓库）** — Spite 25 + Theo 16 的合集；本轮加入 Das Prinzip 22 页。 · [仓库](https://github.com/bear20252026/codevember-sets)
+- **bear/codevember-sets（本仓库）** — Spite 26 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。 · [仓库](https://github.com/bear20252026/codevember-sets)
 - **zhulin025/codevember-archive** — 社区作品目录/采集器，不是代码合集。 · [仓库](https://github.com/zhulin025/codevember-archive)
 
 > 所有列出的正式套系都在 1 GB 以内；最大的是 Adam Chernick 的 771.2 MB。Karim Beyrouti 有 16 个线上页面，但没有公开源码仓库，因此未列入。

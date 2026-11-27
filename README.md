@@ -6,16 +6,16 @@ A parallel repository to [`nodevember`](https://github.com/bear20252026/nodevemb
 
 | Folder | Author | Days | Size | Licence | Live |
 |---|---|---|---|---|---|
-| `spite/` | [@spite](https://github.com/spite) | 25 days | 85.3 MB repo / 106 MB checkout | MIT | `/spite/` |
-| `theo/` | [@theo_t](https://github.com/ttillberg) | 16 pieces | 302.3 MB repo / 86 MB checkout | MIT | `/theo/` |
+| `spite/` | [@spite](https://github.com/spite) | 26 days | 85.3 MB repo / 106 MB checkout | MIT | `/spite/` |
+| `theo/` | [@theo_t](https://github.com/ttillberg) | 18 pieces | 302.3 MB repo / ~89 MB checkout | MIT | `/theo/` |
 | `dasprinzip/` | [Frank Reitberger](https://dasprinzip.com/about.html) | 22 pages of 30 prompts | 51 MB source | no licence | `/dasprinzip/` |
 
 `Das Prinzip` is the new addition: 22 self-contained HTML pages from `02-shatter` to `26-anamorph`, with inline Three.js / WebGPU / TSL, shaders, audio and base64 assets. Days `01-fold`, `03-melt`, `04-tangle` and `05-moss` are not on the author's site; `27–30` are also absent.
 
 ## What is here
 
-- `spite/` — Spite's full source tree: 25 day folders, shared modules, assets, screenshots and gallery.
-- `theo/` — Theo Tillberg's full source tree: 16 day folders, build scripts, template, docs and assets. `dist/` and `node_modules/` are not committed.
+- `spite/` — Spite's full source tree: 26 day folders, shared modules, assets, screenshots and gallery.
+- `theo/` — Theo Tillberg's full source tree: 18 day folders, build scripts, template, docs and assets. `dist/` and `node_modules/` are not committed.
 - `dasprinzip/` — Frank Reitberger's public source archive: 22 original HTML pages, extracted JS/CSS/importmaps, and the two base64-embedded Day 16 pages decoded under `embedded/`.
 - `docs/` — the assembled GitHub Pages site: landing page, `spite/`, `theo/`, `dasprinzip/` and `similar.html`.
 - `SIMILAR.md` and `data/similar-repos.json` — the 2026 similar-repository survey, filtered to sets under 1 GB that are not yet full 30/30.
@@ -62,6 +62,6 @@ Das Prinzip's pages carry no licence notice. They remain the author's copyright;
 
 ## 中文说明
 
-这是 `nodevember` 的平行仓库，现在放三套：Spite 的 25 天、Theo Tillberg 的 16 件，以及 Frank Reitberger（Das Prinzip）的 22 页单文件源码。Spite / Theo 是 MIT，原始 `LICENSE` 保留；Das Prinzip 没有许可证，只按公开页面做研究性镜像，版权归作者。
+这是 `nodevember` 的平行仓库，现在放三套：Spite 的 26 天、Theo Tillberg 的 18 件，以及 Frank Reitberger（Das Prinzip）的 22 页单文件源码。Spite / Theo 是 MIT，原始 `LICENSE` 保留；Das Prinzip 没有许可证，只按公开页面做研究性镜像，版权归作者。
 
-三套都放在 1 GB 以内；新增 Das Prinzip 后，源码目录约 51 MB，`docs/` 站点约 196 MB，整库检出约 594 MB。相似仓库清单见 `SIMILAR.md` 和 `docs/similar.html`。
+三套都放在 1 GB 以内；新增 Das Prinzip 后，源码目录约 51 MB，`docs/` 站点约 200 MB，整库检出约 558 MB（不含 node_modules），git 对象约 193 MB。相似仓库清单见 `SIMILAR.md` 和 `docs/similar.html`。

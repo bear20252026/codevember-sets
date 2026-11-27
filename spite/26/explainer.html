@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="../modules/theme.js"></script><script src="../modules/page.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Anamorph Fakes</title>
+<meta name="description" content="How Codevember 2026 day 26, Anamorph, builds 31 impossible figures as real painted-wood solids cut along one sightline, splits them into blocks that march around the loop, keeps them welded in perspective with a projective warp, traces their shadows in illusion space, and flies the camera into the one viewpoint where they make sense.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Warm grey studio, off-white painted wood, ink. */
+:root {
+  --bg: #ebe8e2;
+  --panel: #f5f3ef;
+  --ink: #1b1c20;
+  --muted: #67625a;
+  --line: #d8d3ca;
+  --accent: #a4472d;
+  --accent2: #2f4f78;
+  --stage: #b8b2a8;
+  --stage-ink: #4a463f;
+  --stage-line: #a29c91;
+  --wood: #e4ddd0;
+  --wood2: #c9c0b0;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --text: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151513; --panel: #1f1e1b; --ink: #ece8e0; --muted: #a39d93; --line: #322f2b;
+    --accent: #e2805f; --accent2: #86a8dc; --stage: #4b4741; --stage-ink: #d6d0c5; --stage-line: #5f5a52;
+    --wood: #ddd5c6; --wood2: #b2a996;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151513; --panel: #1f1e1b; --ink: #ece8e0; --muted: #a39d93; --line: #322f2b;
+  --accent: #e2805f; --accent2: #86a8dc; --stage: #4b4741; --stage-ink: #d6d0c5; --stage-line: #5f5a52;
+  --wood: #ddd5c6; --wood2: #b2a996;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--text); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .glow { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .glow { background: linear-gradient(100deg, var(--accent) 10%, var(--accent2) 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--stage); }
+.hero figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.live { font: 600 14px/1 var(--mono); display: inline-flex; gap: 8px; align-items: center; text-decoration: none; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; border-radius: 3px; background: var(--stage); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+.controls select { font: 400 13px/1 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 5px 6px; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+button { font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px; padding: 9px 14px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: pre; }
+.formula .c { color: var(--muted); }
+.table-wrap { overflow-x: auto; background: var(--panel); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font: 400 14px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+td.num, th.num { text-align: right; }
+td.wrap { white-space: normal; min-width: 260px; }
+tr:last-child td { border-bottom: 0; }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+footer ul { margin: 8px 0 12px; padding-left: 18px; }
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+}
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tile { margin: 0; position: relative; cursor: pointer; background: var(--stage); border-radius: 3px; overflow: hidden; }
+.tile img { display: block; width: 100%; height: auto; aspect-ratio: 1; }
+.tile img.real { position: absolute; inset: 0; opacity: 0; transition: opacity 0.35s; }
+.tile:hover img.real, .tile.on img.real, .gallery.all .tile img.real { opacity: 1; }
+.gallery.all .tile.on img.real { opacity: 0; }
+.tile figcaption { position: absolute; left: 8px; bottom: 6px; font: 400 11px/1 var(--mono); color: #3d3a36; }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 26</b> · Anamorph</div>
+      <h1>How Anamorph <span class="glow">fakes</span></h1>
+      <p class="lede">A Penrose triangle that is a real object: matte painted wood, lit by a soft studio key, casting shadows on itself. It is cut along one line of sight and its pieces are pushed apart in depth, so it only closes from one place. Here is how 31 such figures are built, how they split into blocks that march around the loop, how they stay welded in perspective, how they shadow themselves as if they were possible, and how the camera finds the one viewpoint where they are.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="../screenshots/26.jpg" width="1080" height="1080" alt="A Penrose impossible triangle in matte off-white painted wood, split into eleven chamfered blocks with narrow gaps, on a warm grey studio backdrop." fetchpriority="high" decoding="async">
+      <figcaption>The triangle from its sweet spot, its eleven blocks marching around the loop.</figcaption>
+    </figure>
+  </header>
+
+  <!-- 1. The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>An impossible object you could build</h2>
+      <p>Impossible figures are drawings: a Penrose triangle, an Escher cube, Reutersvärd's cubes. Each one is locally fine, a beam meeting a beam at a right angle, and globally contradictory: follow the loop and you come back in front of where you started. There is a classic way to build one anyway. Make the solid open, with one end far in front of the other, and stand where the two ends line up. From that one viewpoint the gap is hidden behind itself and the eye closes the loop. This is an <em>anamorphosis</em>: a picture that only resolves from one place.</p>
+      <p>The day builds every figure that way, as a real solid, and then makes the trick its subject. Each figure flies in on a long orbit and is seen from the side, where it makes no sense; the camera brakes into the sweet spot, the pieces lock together with a wooden click, and the figure breaks into blocks that march around the impossible loop. Then the blocks close up, the figure fades into the backdrop, and the next one swings in.</p>
+      <p>The aim is a product shot, not a diagram: matte off-white paint over wood with brush lines in it, soft chamfered edges, a single soft key and soft shadows. That last part is the hard one, because a real shadow would give the trick away, so the figures cast shadows from the shape you see, not from the shape that is there.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>31 figures, 29 that march</b><span>Penrose polygons, Escher's cube and waterfall, Reutersvärd's cubes, rings, knots and interlocks. The Escher cube and the chair always stay whole.</span></div>
+      <div class="fact"><b>One cut, 4.59 deep</b><span>The default triangle has one cut, and the piece after it sits <code>√3 · L = 4.59</code> nearer the camera than the piece before it.</span></div>
+      <div class="fact"><b>Up to 220 shadow boxes</b><span>Traced per pixel against where each piece <em>appears</em> to be, not where it is.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Gallery</div>
+      <h2>All thirty-one</h2>
+      <p>Every figure whole, from its sweet spot. Hover or tap one to see it split into its marching blocks, or split them all; the Escher cube and the chair always stay whole.</p>
+    </div>
+    <div class="controls"><button id="galAll" class="ghost" type="button">split them all</button></div>
+    <div class="gallery" id="gallery">
+      <figure class="tile"><img src="gallery/ring-a.jpg" alt="ring from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/ring-split.jpg" alt="ring split into blocks" loading="lazy" width="360" height="360"><figcaption>ring</figcaption></figure>
+      <figure class="tile"><img src="gallery/figure-8-a.jpg" alt="figure-8 from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/figure-8-split.jpg" alt="figure-8 split into blocks" loading="lazy" width="360" height="360"><figcaption>figure-8</figcaption></figure>
+      <figure class="tile"><img src="gallery/trefoil-a.jpg" alt="trefoil from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/trefoil-split.jpg" alt="trefoil split into blocks" loading="lazy" width="360" height="360"><figcaption>trefoil</figcaption></figure>
+      <figure class="tile"><img src="gallery/triangle-a.jpg" alt="triangle from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/triangle-split.jpg" alt="triangle split into blocks" loading="lazy" width="360" height="360"><figcaption>triangle</figcaption></figure>
+      <figure class="tile"><img src="gallery/square-a.jpg" alt="square from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/square-split.jpg" alt="square split into blocks" loading="lazy" width="360" height="360"><figcaption>square</figcaption></figure>
+      <figure class="tile"><img src="gallery/diamond-a.jpg" alt="diamond from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/diamond-split.jpg" alt="diamond split into blocks" loading="lazy" width="360" height="360"><figcaption>diamond</figcaption></figure>
+      <figure class="tile"><img src="gallery/divided-diamond-a.jpg" alt="divided-diamond from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/divided-diamond-split.jpg" alt="divided-diamond split into blocks" loading="lazy" width="360" height="360"><figcaption>divided-diamond</figcaption></figure>
+      <figure class="tile"><img src="gallery/pentagon-a.jpg" alt="pentagon from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/pentagon-split.jpg" alt="pentagon split into blocks" loading="lazy" width="360" height="360"><figcaption>pentagon</figcaption></figure>
+      <figure class="tile"><img src="gallery/hexagon-a.jpg" alt="hexagon from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/hexagon-split.jpg" alt="hexagon split into blocks" loading="lazy" width="360" height="360"><figcaption>hexagon</figcaption></figure>
+      <figure class="tile"><img src="gallery/star-a.jpg" alt="star from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/star-split.jpg" alt="star split into blocks" loading="lazy" width="360" height="360"><figcaption>star</figcaption></figure>
+      <figure class="tile"><img src="gallery/reutersvard-a.jpg" alt="reutersvard from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/reutersvard-split.jpg" alt="reutersvard split into blocks" loading="lazy" width="360" height="360"><figcaption>reutersvard</figcaption></figure>
+      <figure class="tile"><img src="gallery/valknut-a.jpg" alt="valknut from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/valknut-split.jpg" alt="valknut split into blocks" loading="lazy" width="360" height="360"><figcaption>valknut</figcaption></figure>
+      <figure class="tile"><img src="gallery/hex-cross-a.jpg" alt="hex-cross from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/hex-cross-split.jpg" alt="hex-cross split into blocks" loading="lazy" width="360" height="360"><figcaption>hex-cross</figcaption></figure>
+      <figure class="tile"><img src="gallery/hooked-tribar-a.jpg" alt="hooked-tribar from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/hooked-tribar-split.jpg" alt="hooked-tribar split into blocks" loading="lazy" width="360" height="360"><figcaption>hooked-tribar</figcaption></figure>
+      <figure class="tile"><img src="gallery/stairs-a.jpg" alt="stairs from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/stairs-split.jpg" alt="stairs split into blocks" loading="lazy" width="360" height="360"><figcaption>stairs</figcaption></figure>
+      <figure class="tile"><img src="gallery/waterfall-a.jpg" alt="waterfall from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/waterfall-split.jpg" alt="waterfall split into blocks" loading="lazy" width="360" height="360"><figcaption>waterfall</figcaption></figure>
+      <figure class="tile"><img src="gallery/escher-cube-a.jpg" alt="escher-cube from its sweet spot" loading="lazy" width="360" height="360"><figcaption>escher-cube · always whole</figcaption></figure>
+      <figure class="tile"><img src="gallery/archway-a.jpg" alt="archway from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/archway-split.jpg" alt="archway split into blocks" loading="lazy" width="360" height="360"><figcaption>archway</figcaption></figure>
+      <figure class="tile"><img src="gallery/ladder-a.jpg" alt="ladder from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/ladder-split.jpg" alt="ladder split into blocks" loading="lazy" width="360" height="360"><figcaption>ladder</figcaption></figure>
+      <figure class="tile"><img src="gallery/chair-a.jpg" alt="chair from its sweet spot" loading="lazy" width="360" height="360"><figcaption>chair · always whole</figcaption></figure>
+      <figure class="tile"><img src="gallery/cross-a.jpg" alt="cross from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/cross-split.jpg" alt="cross split into blocks" loading="lazy" width="360" height="360"><figcaption>cross</figcaption></figure>
+      <figure class="tile"><img src="gallery/pinwheel-a.jpg" alt="pinwheel from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/pinwheel-split.jpg" alt="pinwheel split into blocks" loading="lazy" width="360" height="360"><figcaption>pinwheel</figcaption></figure>
+      <figure class="tile"><img src="gallery/frame-a.jpg" alt="frame from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/frame-split.jpg" alt="frame split into blocks" loading="lazy" width="360" height="360"><figcaption>frame</figcaption></figure>
+      <figure class="tile"><img src="gallery/s-hook-a.jpg" alt="s-hook from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/s-hook-split.jpg" alt="s-hook split into blocks" loading="lazy" width="360" height="360"><figcaption>s-hook</figcaption></figure>
+      <figure class="tile"><img src="gallery/meander-a.jpg" alt="meander from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/meander-split.jpg" alt="meander split into blocks" loading="lazy" width="360" height="360"><figcaption>meander</figcaption></figure>
+      <figure class="tile"><img src="gallery/spiral-tribar-a.jpg" alt="spiral-tribar from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/spiral-tribar-split.jpg" alt="spiral-tribar split into blocks" loading="lazy" width="360" height="360"><figcaption>spiral-tribar</figcaption></figure>
+      <figure class="tile"><img src="gallery/triquetra-a.jpg" alt="triquetra from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/triquetra-split.jpg" alt="triquetra split into blocks" loading="lazy" width="360" height="360"><figcaption>triquetra</figcaption></figure>
+      <figure class="tile"><img src="gallery/double-tribar-a.jpg" alt="double-tribar from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/double-tribar-split.jpg" alt="double-tribar split into blocks" loading="lazy" width="360" height="360"><figcaption>double-tribar</figcaption></figure>
+      <figure class="tile"><img src="gallery/borromean-a.jpg" alt="borromean from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/borromean-split.jpg" alt="borromean split into blocks" loading="lazy" width="360" height="360"><figcaption>borromean</figcaption></figure>
+      <figure class="tile"><img src="gallery/borromean-tribar-a.jpg" alt="borromean-tribar from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/borromean-tribar-split.jpg" alt="borromean-tribar split into blocks" loading="lazy" width="360" height="360"><figcaption>borromean-tribar</figcaption></figure>
+      <figure class="tile"><img src="gallery/hourglass-a.jpg" alt="hourglass from its sweet spot" loading="lazy" width="360" height="360"><img class="real" src="gallery/hourglass-split.jpg" alt="hourglass split into blocks" loading="lazy" width="360" height="360"><figcaption>hourglass</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- 2. The cut -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The cut · <b>objects.js, anamorph.js</b></div>
+      <h2>Cut along the line of sight</h2>
+      <p>The sweet spot looks straight down −z: the camera is on the +z axis, at 12 units in orthographic mode, framing 4.3 units of height. Every figure is built in that frame. A <em>portal</em> is a point on a loop where it is cut by a plane that contains the line of sight: the plane is vertical in z, and across the beam on screen (its normal is the beam's screen direction, with no z). Everything past the cut is then moved along z by a jump <code>jz</code>. Since the move is along the line of sight and the cut plane contains it, the two faces of the cut project onto exactly the same outline on screen: from the sweet spot there is nothing to see, and the beam looks whole.</p>
+      <p>A Penrose triangle is three beams along three axes of a cube, at right angles to each other in 3D. Seen in isometric projection each axis drops away from the camera by the same amount, so walking around the three beams, each of length <code>L</code>, ends <code>√3 · L</code> further back than it started, right behind the start on screen. One portal halfway along the first beam with <code>jz = √3 · L</code> pays that depth back. The solid is then a single bent bar whose two ends meet on screen and are 4.59 units apart in depth at the default size (<code>L = 2.55 × radius 1.04 = 2.65</code>).</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The triangle, off its sweet spot</h3>
+        <div class="controls">
+          <label>orbit <input id="cuT" type="range" min="-35" max="35" step="0.5" value="14"><output id="cuTo"></output></label>
+          <button id="cuZ" class="ghost">sweet spot</button>
+        </div>
+      </div>
+      <canvas id="cutFig" aria-label="Left: the default Penrose triangle drawn as square beams, seen orthographically after orbiting about the vertical axis by the chosen angle; at zero the cut ends meet. Right: a top view of the same solid with the jump at the cut and the camera's sightlines."></canvas>
+      <div class="readout" id="cuR"></div>
+      <p class="fig-cap">The same basis, lengths and cut as <code>buildTriangle</code>: three square beams of half-width 0.185 on the isometric lattice, cut halfway along the bottom beam. Right, from above: the two ends of the cut are on one sightline at 0°. Orbit and they slide apart on screen by <code>jz · sin θ</code>; the readout also gives what the day does to its shadows at that angle.</p>
+    </div>
+    <div class="col prose">
+      <p>Cuts sit on straight runs of beam, between corners, and where no other beam crosses in front of them on screen. Some figures need several: the S-hook and the hexagon-cross have two, the triquetra, pinwheel and hooked tribar three, the double tribar three per triangle. Their jumps can be in either direction; the S-hook's cancel each other out (<code>+1.6·arm</code>, then <code>−1.6·arm</code>).</p>
+    </div>
+  </section>
+
+  <!-- 3. Figures -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The figures · <b>objects.js</b></div>
+      <h2>Thirty-one figures on a cube lattice</h2>
+      <p>Most figures are straight beams along the three axes of a cube, drawn in isometric: the axes are turned 45° about the vertical and pitched by the isometric angle, 35.26°, so each one drops away from the camera by the same amount and one step along all three lands straight behind where it started. A loop is a list of bars and cuts; the beam's square section, an octagon with the chamfer of 0.1, is carried round every 90° corner with a mitre so it never twists, and the loop position <code>s</code> runs by length from the first cut, from 0 to 1.</p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>family</th><th>figures</th><th>built as</th></tr></thead>
+      <tbody>
+        <tr><td>Curved ribbons (3)</td><td class="wrap">ring, figure-8, trefoil</td><td class="wrap">Smooth curves with a rectangular section. The ring is two half-tori tilted 45°, the second turned 180° about the line of sight, cut at s = 0 and 0.5. The figure-8 (after Fernando Cortell) has one cut at its top and its side walls flip across the waist; the trefoil is a torus-knot ribbon with three cuts.</td></tr>
+        <tr><td>Penrose polygons (4)</td><td class="wrap">square, diamond, pentagon, hexagon</td><td class="wrap">An N-sided loop of flat rhombus prisms with C<sub>N</sub> symmetry, each bar's inner front face continuing into the next bar's bevel around every corner; one cut.</td></tr>
+        <tr><td>Lattice loops (12)</td><td class="wrap">triangle, frame, s-hook, triquetra, hourglass, stairs, meander, cross, pinwheel, star, hooked-tribar, reutersvard</td><td class="wrap">One closed loop of beams on the cube lattice: 3 bars (triangle) up to 12 (stairs, cross, star, hooked tribar). The self-crossing ones (s-hook, triquetra, hourglass, meander, hooked tribar) pass over themselves. Reutersvärd's figure is nine floating cubes while whole and a tribar of blocks while it marches.</td></tr>
+        <tr><td>Interlocked loops (4)</td><td class="wrap">double-tribar, valknut, borromean, borromean-tribar</td><td class="wrap">Two or three loops that pass over and under each other: two Penrose triangles in a star of David, Odin's three triangles, three golden frames, and three square plates with round-cornered holes.</td></tr>
+        <tr><td>Loops with open paths (6)</td><td class="wrap">divided-diamond, spiral-tribar, hex-cross, waterfall, archway, ladder</td><td class="wrap">A loop plus open beams welded onto it: a spine through a rhombus, an inner spiral arm, two rear pillars, Escher's waterfall towers, a viaduct's middle column, a ladder's three rungs that change sides.</td></tr>
+        <tr><td>Pillar figures (2)</td><td class="wrap">escher-cube, chair</td><td class="wrap">Built from square frames and open pillars, some pillars cut twice so their middle sits in front of or behind a crossing beam. They never split: 6 and 7 pieces that only make sense whole.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="col prose">
+      <p>Two families need more than bars. The <b>valknut</b>'s three triangles lie across each other, so a cut halfway along a beam could land under another triangle; each triangle's cut is placed by search instead, at the point of its outline farthest from every other bar on screen. The <b>borromean tribar</b>'s three plates have rims of constant width around their round-cornered holes, and <code>s</code> runs by arc length along the middle of the band, so equal steps make equal blocks.</p>
+    </div>
+  </section>
+
+    <section>
+    <div class="col prose">
+      <div class="eyebrow">Building · <b>anamorph.js</b></div>
+      <h2>Prisms, cut in two</h2>
+      <p>The meshes are rebuilt on the CPU every frame the figure changes, into buffers allocated once. A piece of loop becomes a prism: rings of 4 or 8 corners at every corner, hinge and bevel boundary, joined by walls with exact normals. Each vertex also carries its sweet-spot position and normal and a tag (loop, bar, <code>s</code>, portal depth), which the paint and the shadows run on. Block ends are bevelled at 45°, sized on the whole block so a block cut at a portal keeps one taper through the cut, and the bevel grows with its gap.</p>
+      <p>A block that straddles a cut is built once as an unbroken prism and clipped against the cut's plane twice, one half kept and the other moved by <code>jz</code>, so both halves share one outline on screen. Vertices far along the loop are forced to their own side so a beam turning back past the cut isn't sliced too, but they keep their true distance to the plane, so the cut stays straight. From the sweet spot the cut faces can't be seen and aren't drawn; off it they are capped.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Marching · <b>main.js, anamorph.js</b></div>
+      <h2>Blocks on a conveyor</h2>
+      <p>Each loop gets as many blocks as make them Block length × 0.28 long on screen (0.62 at the default), preferring a multiple of its corners when that stays within 12%: the triangle gets 11. The loop is a conveyor of <code>n</code> blocks and <code>n</code> gaps, and a phase moving at 0.07 loops a second shifts them all; a block crossing a cut is clipped in two there and, from the sweet spot, just slides through it. Open paths, a ladder's rungs or the waterfall's towers, stay whole while the loops march.</p>
+      <p>The split is one number rising from 0 to 1 over 4 s once the camera settles, and falling back before the figure leaves. Each gap opens after a delay set by the split style: all at once (together, fast at first, since a narrow slot is the hardest thing to shadow), one after another (wave, and slide, where the block behind falls back), every other one first (alternate), by halving the loop (halving), outward from the cuts (joins) or both ways from one point.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Gaps opening around a loop</h3>
+        <div class="controls">
+          <label>style <select id="blS"><option>together</option><option selected>wave</option><option>alternate</option><option>halving</option><option>joins</option><option>both ways</option><option>slide</option></select></label>
+          <label>split <input id="blP" type="range" min="0" max="1" step="0.005" value="0.6"><output id="blPo"></output></label>
+          <label>blocks <input id="blN" type="range" min="3" max="19" step="1" value="11"><output id="blNo"></output></label>
+          <label>gap <input id="blG" type="range" min="0.07" max="0.45" step="0.01" value="0.11"><output id="blGo"></output></label>
+          <button id="blPl" class="ghost">play</button>
+        </div>
+      </div>
+      <canvas id="blockFig" aria-label="Left: a closed loop drawn as a circle with its blocks as arcs and the portal cut marked at the top; the gaps open as the split slider rises. Right: one row per gap with its delay and how open it is."></canvas>
+      <div class="readout" id="blR"></div>
+      <p class="fig-cap">The loop unrolled onto a circle, starting at its cut (top). Each block is an arc; on the right, each gap's delay (tick) and how far it is open (bar). Play runs the split over 4 s as the day does, then lets the blocks march at 0.07 loops a second. A gap counts as open for the sound once it passes 0.12.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Look · <b>main.js</b></div>
+      <h2>Paint, light and perspective</h2>
+      <p>The paint has no textures. It runs in loop coordinates, so it rides with a marching block and continues across a closed seam: a slow drift of tone at ±1.2%, and long brush lines, 55 to the unit across the beam and wobbled so they never line up, which barely touch the colour and mostly show in the roughness, as a satin finish does, with a faint bump on the normal.</p>
+      <p>The figures render through the shared photographic pipeline, matte off-white (#e4ddd0) under a soft key from the upper left in a warm grey studio, with its shadow maps and screen-space AO and GI turned off: both see the real depth, which is wrong at every cut. The traced shadows below replace them.</p>
+      <p>The figures are built for orthographic projection, the default. In perspective (O), every vertex is moved by a projective transform, <code>(x, y, z) → D / (D + κz) · (x, y, κz)</code>, that keeps lines straight and lands each point on the pixel the orthographic view would, so the figure still welds from the sweet spot.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Illusion space · <b>anamorph.js, main.js</b></div>
+      <h2>Shadows from the shape you see</h2>
+      <p>An impossible figure, if it existed, would shadow itself consistently. The real solid can't, because its beams aren't where they appear to be. So the shadows are traced per pixel in illusion space, where every piece sits where it seems to be from the sweet spot. Each frame the figure is described as up to 220 boxes, one per straight run or block, and each pixel traces the key light and a short ambient ray against them, with a penumbra that widens with distance.</p>
+      <p>Within one loop the cut depths are taken back out, so the loop becomes an endless spiral that never closes, and a box is placed on the receiver's own turn of it: the beam half a loop ahead and half a loop behind sits where the eye believes it is. Boxes from other loops, or crossing over, are lifted to just above the receiver. Curved figures and the borromean tribar's plates are traced against their exact shapes.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The triangle, unwound</h3>
+        <div class="controls">
+          <label>receiver s <input id="uwS" type="range" min="0" max="0.999" step="0.001" value="0.85"><output id="uwSo"></output></label>
+        </div>
+      </div>
+      <canvas id="unwindFig" aria-label="Depth against loop position for the default Penrose triangle: the real solid is a sawtooth that jumps up at every cut; the illusion-space line through the receiver is straight, and it is used for half a loop either side, fading out near the ends."></canvas>
+      <div class="readout" id="uwR"></div>
+      <p class="fig-cap">Depth along the loop for the default triangle (z toward the camera). The real solid drops 4.59 per lap and jumps forward at the cut, a sawtooth. The receiver sees blockers on the straight line through itself, half a loop either way, fading over 0.38 to 0.48: near its end of the loop, blocks just past the cut are placed a full lap lower than they really are.</p>
+    </div>
+    <div class="col prose">
+      <p>Those shadows only match the picture near the sweet spot, so they fade out as the camera leaves it, between 3° and 15°. Further out the figure is lit without them, which reads as an unshadowed object rather than a wrong one.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The show · <b>main.js</b></div>
+      <h2>Orbit, click, split, leave</h2>
+      <p>Every figure plays the same phases. It grows in over 0.6 s while the camera swings 2.2 turns around it in 7 s, seeing the impossible figure from every side as the nonsense it really is. It lands on the sweet spot with a click, splits and marches, and when the next figure is asked for, it closes up, grows slightly and fades into exactly the backdrop behind it.</p>
+      <p>The camera doesn't follow an easing curve, which would stop dead. A guide path brakes into the sweet spot, and an under-damped spring (ω = 7, ζ = 0.7) chases it, rounding off the start and gliding in; once it has settled it is pinned exactly. While a figure is on screen the camera sways about the line of sight, ±14° over 14 s, passing upright as it lands: a roll about the sightline keeps the figure welded.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Landing on the sweet spot</h3>
+        <div class="controls">
+          <label>orbit (s) <input id="spT" type="range" min="1" max="15" step="0.5" value="7"><output id="spTo"></output></label>
+          <label>ω <input id="spW" type="range" min="2" max="14" step="0.5" value="7"><output id="spWo"></output></label>
+          <label>ζ <input id="spZ" type="range" min="0.3" max="1.2" step="0.05" value="0.7"><output id="spZo"></output></label>
+          <button id="spN" class="ghost">new swing</button>
+        </div>
+      </div>
+      <canvas id="springFig" aria-label="Top: the camera's yaw over time for the guide path and the spring that chases it, from 396 degrees down to zero. Bottom: the last seconds magnified to a few degrees, with the click and the settle marked."></canvas>
+      <div class="readout" id="spR"></div>
+      <p class="fig-cap">The yaw of one orbit, simulated with the day's code at 60 fps (4 spring substeps a frame). Top, the whole swing; bottom, the landing magnified, with the moment the camera comes within 0.12° (the click) and the moment it is pinned. ω and ζ are fixed in the day; the sliders show what they do. Shorten the orbit to see the spring overshoot.</p>
+    </div>
+    <div class="col prose">
+      <p>Dragging breaks the illusion: a few degrees off, the cut ends step apart; further, the figure falls into its real, open shape. Letting go eases back to the sweet spot, keeping your zoom. Near the sweet spot a hand-placed camera is never quite on the axis, so the figure turns to meet it, fully within 2.5° and not at all past 7°.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Sound · <b>sound.js</b></div>
+      <h2>Air, a click and wooden blocks</h2>
+      <p>Each orbit sets off with a deep whoosh, under a synthesized swoosh that follows how fast the camera swings: looping pink noise through a low body, a band that sweeps up and flutters, and high air, panned with the camera. The landing is a single wooden click, played when the pieces come within a pixel of each other. Every gap that opens or closes knocks one of three hits cut from a recording of toy wooden blocks, lower when closing, so together makes a burst and wave a run around the loop. All of it goes through a short generated room reverb.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Using it</div>
+      <h2>Controls</h2>
+    </div>
+    <ul class="keys col">
+      <li>Drag to orbit and break the illusion, scroll or pinch to zoom. Letting go eases back to the sweet spot; <b>L</b> does it any time.</li>
+      <li><b>R</b> (or the dice) for a new figure; <b>[</b> and <b>]</b> step through the 31 in order.</li>
+      <li><b>S</b> toggles the blocks, <b>E</b> the ink outlines, <b>O</b> orthographic / perspective.</li>
+      <li><b>Geometry</b>: figure, randomize pool, split style, block length (1.2–4), gap (0.07–0.45), radius, thickness, chamfer (0–0.45).</li>
+      <li><b>Motion &amp; View</b>: projection, FOV (28–70°), march speed, camera sway (0–30°), reverse, auto-snap.</li>
+      <li><b>Look</b>: painted, dark, studio or wireframe, the shadow strength and the outlines. <b>Transition</b>: grow in, orbit, split / merge and exit times.</li>
+      <li><b>M</b> or the speaker button toggles sound, <b>Space</b> pauses, <b>F</b> goes fullscreen, <b>Tab</b> hides the panel.</li>
+      <li>Left alone, it changes figure every 14 s (<b>Auto change</b>).</li>
+    </ul>
+  </section>
+
+  <footer class="col">
+    <div class="meta">
+      <span><b>three.js</b> r187</span><span>WebGL2</span><span>photographic pipeline</span><span>illusion-space traced shadows</span><span>sightline cuts</span><span>started in <b>Antigravity</b> with Gemini 4 Carbon, finished in <b>Claude Code</b> with Opus 5.5</span>
+    </div>
+    Day 26 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/26/">spite.github.io/codevember-2026/26</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/26">26/ of the codevember-2026 repository</a>.
+    <br><br>Sounds: CC0 recordings on freesound.org:
+    <ul>
+      <li>"Wooden Click" by BenjaminNelan (321083), the landing</li>
+      <li>single hits cut from "Toy-Wooden-Blocks_Child.wav" by rzSHI (395675), the split knocks</li>
+      <li>"Deep Whoosh Speed Ramp" by oMzig (789075) and "Deep Whoosh #5" by Kinoton (558827), the orbit whoosh</li>
+    </ul>
+  </footer>
+</main>
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const clamp01 = (x) => clamp(x, 0, 1);
+  const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+  const font = (px, w = 400) => `${w} ${px}px ${css("--mono") || "monospace"}`;
+  const rgb = (hex) => { const c = document.createElement("canvas").getContext("2d"); c.fillStyle = hex; const s = c.fillStyle; if (s[0] === "#") return [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16)); return s.match(/\d+/g).slice(0, 3).map(Number); };
+  const rgba = (hex, a) => `rgba(${rgb(hex).join(",")},${a})`;
+  const DEG = Math.PI / 180;
+
+  function setup(canvas, aspect, draw) {
+    const ctx = canvas.getContext("2d");
+    let lastW = -1, W = 0, H = 0;
+    const fit = (force) => {
+      if (force !== true && canvas.clientWidth === lastW) return;
+      lastW = canvas.clientWidth;
+      W = canvas.clientWidth || 600; H = Math.round(W * (typeof aspect === "function" ? aspect(W) : aspect));
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(ctx, W, H);
+    };
+    new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fit(true));
+    new MutationObserver(() => fit(true)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { redraw: () => fit(true) };
+  }
+  const bind = (id, out, fmt, fn) => { const el = $(id); const o = $(out); const show = () => { if (o) o.textContent = fmt(+el.value); }; el.addEventListener("input", () => { show(); fn(); }); show(); return el; };
+  const stage = (ctx, W, H) => { ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H); };
+  const label = (ctx, text, x, y, color = css("--stage-ink"), size = 11, align = "left") => { ctx.fillStyle = color; ctx.font = font(size); ctx.textAlign = align; ctx.fillText(text, x, y); ctx.textAlign = "left"; };
+
+  // ---- Cube-lattice basis (as objects.js makeCubeLatticeBasis) ----
+  const S13 = Math.sqrt(1 / 3);
+  const ISO_PITCH_DEG = Math.asin(S13) / DEG;
+  function makeBasis(tiltDeg, rollDeg, yawDeg = 45) {
+    const p = (ISO_PITCH_DEG + (tiltDeg - 45) * 0.42) * DEG, y = yawDeg * DEG;
+    const cy = Math.cos(y), sy = Math.sin(y), cp = Math.cos(p), sp = Math.sin(p);
+    const raw = [[1, 0, 0], [0, 1, 0], [0, 0, -1]].map(([vx, vy, vz]) => {
+      const x1 = cy * vx + sy * vz, y1 = vy, z1 = -sy * vx + cy * vz;
+      return [x1, cp * y1 - sp * z1, sp * y1 + cp * z1];
+    });
+    for (const r of raw) if (r[2] > 0) { r[0] = -r[0]; r[1] = -r[1]; r[2] = -r[2]; }
+    const d = rollDeg * DEG - Math.atan2(raw[0][1], raw[0][0]), cd = Math.cos(d), sd = Math.sin(d);
+    const E = raw.map(([x, y2, z]) => [x * cd - y2 * sd, x * sd + y2 * cd, z]);
+    if (E[0][0] * E[1][1] - E[0][1] * E[1][0] < 0) { const t = E[1]; E[1] = E[2]; E[2] = t; }
+    return { E, weights: E.map((e) => -e[2] / S13) };
+  }
+  const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+  // ---- The default triangle (buildTriangle with radius 1.04, thickness 0.44) ----
+  const TRI_L = 2.55 * 1.04, TRI_H = Math.min(0.44 * 0.42, TRI_L * 0.43), JZ = TRI_L * Math.sqrt(3);
+  const tri = (() => {
+    const { E, weights } = makeBasis(45, 0);
+    const T = E.map((e, i) => e.map((c) => c * weights[i]));
+    // vertices before centring: S, C (cut), V1, V2
+    let pts = [[0, 0, 0]];
+    let p = [0, 0, 0];
+    const C0 = add(p, T[0], TRI_L * 0.5);
+    const C1 = add(C0, [0, 0, JZ]);
+    const V1 = add(C1, T[0], TRI_L * 0.5), V2 = add(V1, T[1], TRI_L), V3 = add(V2, T[2], TRI_L);
+    const all = [p, C0, C1, V1, V2, V3];
+    let mnx = 0, mxx = 0, mny = 0, mxy = 0, q = [0, 0];
+    for (let i = 0; i < 3; i++) { q = [q[0] + TRI_L * T[i][0], q[1] + TRI_L * T[i][1]]; mnx = Math.min(mnx, q[0]); mxx = Math.max(mxx, q[0]); mny = Math.min(mny, q[1]); mxy = Math.max(mxy, q[1]); }
+    const sx = -0.5 * (mnx + mxx), sy = -0.5 * (mny + mxy);
+    const zs = all.map((v) => v[2]);
+    const zMid = 0.5 * (Math.min(...zs) + Math.max(...zs));
+    const sh = (v) => [v[0] + sx, v[1] + sy, v[2] - zMid];
+    const [S, C, Cf, A, B] = [p, C0, C1, V1, V2].map(sh);
+    const Eu = E.map((e) => { const l = Math.hypot(...e); return e.map((c) => c / l); });
+    const u2 = [Eu[0][0], Eu[0][1], 0]; const ul = Math.hypot(u2[0], u2[1]); u2[0] /= ul; u2[1] /= ul;
+    const h = TRI_H;
+    // each corner cube belongs to one piece, so no faces overlap
+    const pieces = [
+      { P: Cf, Q: add(A, Eu[0], -h), ax: 0, clipStart: Cf },
+      { P: add(A, Eu[1], -h), Q: add(B, Eu[1], h), ax: 1 },
+      { P: add(B, Eu[2], h), Q: add(S, Eu[2], h), ax: 2 },
+      { P: add(S, Eu[0], h), Q: C, ax: 0, clipEnd: C },
+    ];
+    return { E: Eu, pieces, u2, h, S, C, Cf, A, B };
+  })();
+
+  function triQuads() {
+    const quads = [];
+    const { E, pieces, u2, h } = tri;
+    for (const pc of pieces) {
+      const Tn = E[pc.ax], Aa = E[(pc.ax + 1) % 3], Bb = E[(pc.ax + 2) % 3];
+      const offs = [add(add([0, 0, 0], Aa, -h), Bb, -h), add(add([0, 0, 0], Aa, h), Bb, -h), add(add([0, 0, 0], Aa, h), Bb, h), add(add([0, 0, 0], Aa, -h), Bb, h)];
+      const sideN = [Bb.map((c) => -c), Aa, Bb, Aa.map((c) => -c)];
+      const ringAt = (base, clipPt) => offs.map((d) => {
+        const c = add(base, d);
+        if (!clipPt) return c;
+        const t = -((c[0] - clipPt[0]) * u2[0] + (c[1] - clipPt[1]) * u2[1]) / (Tn[0] * u2[0] + Tn[1] * u2[1]);
+        return add(c, Tn, t);
+      });
+      const r0 = ringAt(pc.P, pc.clipStart), r1 = ringAt(pc.Q, pc.clipEnd);
+      const len = Math.hypot(pc.Q[0] - pc.P[0], pc.Q[1] - pc.P[1], pc.Q[2] - pc.P[2]);
+      const M = Math.max(2, Math.round(len / 0.12));
+      const ring = (i) => r0.map((a, c) => add(a, [r1[c][0] - a[0], r1[c][1] - a[1], r1[c][2] - a[2]], i / M));
+      let prev = ring(0);
+      for (let i = 1; i <= M; i++) {
+        const cur = ring(i);
+        for (let w = 0; w < 4; w++) { const w1 = (w + 1) % 4; quads.push({ p: [prev[w], prev[w1], cur[w1], cur[w]], n: sideN[w] }); }
+        prev = cur;
+      }
+      const capN0 = pc.clipStart ? [-u2[0], -u2[1], 0] : Tn.map((c) => -c);
+      const capN1 = pc.clipEnd ? u2 : Tn;
+      quads.push({ p: r0, n: capN0 }, { p: r1, n: capN1 });
+    }
+    return quads;
+  }
+  const TRI_QUADS = triQuads();
+  const KEY = (() => { const k = [-0.55, 0.62, 0.56], l = Math.hypot(...k); return k.map((c) => c / l); })();
+
+  // The triangle is drawn with WebGL into an offscreen canvas, so overlapping beams are resolved per pixel by a depth
+  // buffer instead of a face sort that flips order as it turns.
+  const triGL = (() => {
+    const cv = document.createElement("canvas");
+    const gl = cv.getContext("webgl", { antialias: true, premultipliedAlpha: true, alpha: true });
+    if (!gl) return null;
+    const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, `
+      attribute vec3 p; attribute float lit; uniform vec2 cs; uniform vec2 sc; varying float vLit;
+      void main() {
+        vec3 r = vec3(p.x * cs.x - p.z * cs.y, p.y, p.x * cs.y + p.z * cs.x);
+        vLit = lit;
+        gl_Position = vec4(r.x * sc.x, r.y * sc.y - 0.03, -r.z * 0.1, 1.0);
+      }`));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `
+      precision mediump float; uniform vec3 wood; varying float vLit;
+      void main() { gl_FragColor = vec4(wood * vLit, 1.0); }`));
+    gl.linkProgram(prog);
+    const pos = [], lit = [];
+    for (const q of TRI_QUADS) {
+      const l = 0.38 + 0.62 * Math.max(0, dot(q.n, KEY));
+      for (const i of [0, 1, 2, 0, 2, 3]) { pos.push(...q.p[i]); lit.push(l); }
+    }
+    const buf = (data, loc, n) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW); const a = gl.getAttribLocation(prog, loc); gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, n, gl.FLOAT, false, 0, 0); };
+    gl.useProgram(prog);
+    buf(pos, "p", 3); buf(lit, "lit", 1);
+    const count = pos.length / 3;
+    return (w, h, th, scale, wood) => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      gl.viewport(0, 0, cv.width, cv.height);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+      gl.uniform2f(gl.getUniformLocation(prog, "cs"), Math.cos(th), Math.sin(th));
+      gl.uniform2f(gl.getUniformLocation(prog, "sc"), (2 * scale) / w, (2 * scale) / h);
+      gl.uniform3f(gl.getUniformLocation(prog, "wood"), wood[0] / 255, wood[1] / 255, wood[2] / 255);
+      gl.drawArrays(gl.TRIANGLES, 0, count);
+      return cv;
+    };
+  })();
+
+  // ---- 1. The cut ----
+  {
+    const T = $("cuT");
+    const fig = setup($("cutFig"), (W) => (W < 600 ? 1.45 : 0.56), (ctx, W, H) => {
+      stage(ctx, W, H);
+      const th = +T.value * DEG, c = Math.cos(th), s = Math.sin(th);
+      const narrow = W < 600;
+      const mainW = narrow ? W : W * 0.6, mainH = narrow ? H * 0.62 : H;
+      // main view: orbit about y, ortho
+      const scale = Math.min(mainW, mainH) / 3.4;
+      const ox = mainW / 2, oy = mainH / 2 + scale * 0.05;
+      const wood = rgb(css("--wood"));
+      if (triGL) ctx.drawImage(triGL(mainW, mainH, th, scale, wood), 0, 0, mainW, mainH);
+      label(ctx, "seen from the camera", 14, 20);
+      label(ctx, `orbit ${(+T.value).toFixed(1)}°`, 14, 36, css("--accent"));
+      // top view
+      const tx0 = narrow ? 0 : mainW, ty0 = narrow ? mainH : 0, tw = narrow ? W : W - mainW, th2 = narrow ? H - mainH : H;
+      ctx.strokeStyle = css("--stage-line"); ctx.lineWidth = 1;
+      ctx.beginPath(); if (narrow) { ctx.moveTo(10, ty0); ctx.lineTo(W - 10, ty0); } else { ctx.moveTo(tx0, 10); ctx.lineTo(tx0, H - 10); } ctx.stroke();
+      const { S, C, Cf, A, B } = tri;
+      const ts = Math.min(tw / 3.6, th2 / 6.2);
+      const tcx = tx0 + tw / 2, tcy = ty0 + th2 / 2 + 6;
+      const P = (v) => [tcx + v[0] * ts, tcy - v[2] * ts];
+      // sightlines
+      const dir = [s, c];
+      ctx.setLineDash([3, 4]); ctx.strokeStyle = css("--accent2"); ctx.lineWidth = 1;
+      for (const v of [C, Cf]) {
+        const [x, y] = P(v); const k = 400;
+        ctx.beginPath(); ctx.moveTo(x - dir[0] * k, y + dir[1] * k); ctx.lineTo(x + dir[0] * k, y - dir[1] * k); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      const seg = (a, b, col, w) => { const [x0, y0] = P(a), [x1, y1] = P(b); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); };
+      const w = Math.max(3, TRI_H * 2 * ts);
+      seg(S, C, css("--wood2"), w); seg(Cf, A, css("--wood2"), w); seg(A, B, css("--wood2"), w); seg(B, S, css("--wood2"), w);
+      seg(S, C, css("--ink"), 1.2); seg(Cf, A, css("--ink"), 1.2); seg(A, B, css("--ink"), 1.2); seg(B, S, css("--ink"), 1.2);
+      ctx.setLineDash([2, 3]); seg(C, Cf, css("--accent"), 1.4); ctx.setLineDash([]);
+      const [jx, jy] = P([0.5 * (C[0] + Cf[0]), 0, 0.5 * (C[2] + Cf[2])]);
+      label(ctx, "jz = 4.59", jx + 14, jy + 16, css("--accent"));
+      label(ctx, "from above (x, z)", tx0 + 14, ty0 + 20);
+      label(ctx, "camera ↑", tx0 + 14, ty0 + 36, css("--accent2"));
+    });
+    const upd = () => {
+      const th = +T.value, gap = JZ * Math.abs(Math.sin(th * DEG));
+      const fade = 1 - smoothstep(3, 15, Math.abs(th));
+      $("cuR").innerHTML = `<span>step at the cut on screen <b>${gap.toFixed(3)}</b> (${(gap / (2 * TRI_H)).toFixed(2)} beam widths)</span><span>shadows <b>${Math.round(fade * 100)}%</b></span><span>cut caps <b>${Math.abs(th) > 0.19 ? "drawn" : "none"}</b></span>`;
+      fig.redraw();
+    };
+    bind("cuT", "cuTo", (v) => `${v.toFixed(1)}°`, upd);
+    $("cuZ").addEventListener("click", () => { T.value = 0; T.dispatchEvent(new Event("input")); });
+    upd();
+  }
+
+  // ---- 2. Blocks ----
+  {
+    const wrapHalf = (x) => { let r = (x + 0.5) % 1; if (r < 0) r += 1; return r - 0.5; };
+    const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+    const state = { phase: 0 };
+    function layout(style, splitRaw, n, gapIn, phase) {
+      const split = easeInOutSine(splitRaw);
+      const gap = Math.min(0.85, Math.max(0.02, gapIn));
+      const levels = Math.max(1, Math.ceil(Math.log2(n)));
+      const cuts = [0];
+      const delay = (jj) => {
+        switch (style) {
+          case "wave": case "slide": return jj / n;
+          case "alternate": return jj % 2 ? 1 : 0;
+          case "halving": for (let L = 0; L <= levels; L++) { const x = (jj * 2 ** L) / n; if (Math.abs(x - Math.round(x)) < (0.5 * 2 ** L) / n) return L / levels; } return 1;
+          case "both ways": return Math.min(jj, n - jj) / Math.max(1, n / 2);
+          case "joins": { const sg = (jj + 0.5) / n + phase; let d = 0.5; for (const c of cuts) d = Math.min(d, Math.abs(wrapHalf(sg - c))); return Math.min(1, d / 0.5); }
+          default: return 0;
+        }
+      };
+      const open = (j) => {
+        if (split >= 1) return 1;
+        if (style === "together") return 1 - (1 - Math.max(0, split)) ** 3;
+        const jj = ((j % n) + n) % n;
+        const spread = style === "alternate" ? 1 : Math.min(1, 3 / n);
+        const t = clamp01((split * (1 + spread) - delay(jj)) / spread);
+        return t * t * (3 - 2 * t);
+      };
+      const gapS = gap / n, slide = style === "slide";
+      const blocks = [];
+      for (let k = 0; k < n; k++) {
+        const oS = open(k - 1), oE = open(k);
+        const b0 = (k - 0.5) / n + phase + (slide ? 0 : 0.5 * gapS * oS);
+        const b1 = (k + 0.5) / n + phase - (slide ? gapS * oE : 0.5 * gapS * oE);
+        blocks.push([b0, b1]);
+      }
+      const gaps = [];
+      for (let j = 0; j < n; j++) gaps.push({ delay: style === "together" ? 0 : delay(j), open: open(j) });
+      return { blocks, gaps, split };
+    }
+    const P = $("blP"), N = $("blN"), G = $("blG"), Sst = $("blS");
+    const fig = setup($("blockFig"), (W) => (W < 600 ? 1.5 : 0.5), (ctx, W, H) => {
+      stage(ctx, W, H);
+      const n = +N.value;
+      const L = layout(Sst.value, +P.value, n, +G.value, state.phase);
+      const narrow = W < 600;
+      const ringW = narrow ? W : W * 0.5, ringH = narrow ? H * 0.55 : H;
+      const cx = ringW / 2, cy = ringH / 2, R = Math.min(ringW, ringH) * 0.34, bw = Math.max(10, R * 0.16);
+      const ang = (s) => -Math.PI / 2 + s * Math.PI * 2;
+      ctx.strokeStyle = rgba(css("--ink"), 0.12); ctx.lineWidth = bw + 6;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineCap = "butt";
+      L.blocks.forEach(([a, b], k) => {
+        ctx.strokeStyle = css("--ink"); ctx.lineWidth = bw + 2;
+        ctx.beginPath(); ctx.arc(cx, cy, R, ang(a), ang(b)); ctx.stroke();
+        ctx.strokeStyle = k % 2 ? css("--wood2") : css("--wood"); ctx.lineWidth = bw;
+        ctx.beginPath(); ctx.arc(cx, cy, R, ang(a) + 0.004, ang(b) - 0.004); ctx.stroke();
+      });
+      // cut
+      ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(cx, cy - R - bw); ctx.lineTo(cx, cy - R + bw); ctx.stroke(); ctx.setLineDash([]);
+      label(ctx, "cut (s = 0)", cx, cy - R - bw - 6, css("--accent"), 11, "center");
+      label(ctx, `split ${L.split.toFixed(2)} (eased)`, cx, cy + 4, css("--stage-ink"), 11, "center");
+      // rows
+      const rx = narrow ? 14 : ringW + 10, ry = narrow ? ringH + 6 : 18, rw = (narrow ? W : W - ringW) - 28, rh = (narrow ? H - ringH : H) - 30;
+      const rowH = Math.min(22, rh / n);
+      const tx = rx + 52, trw = rw - 60;
+      label(ctx, "gap   delay ▾ / open ▬", rx, ry + 2);
+      L.gaps.forEach((g, j) => {
+        const y = ry + 12 + j * rowH;
+        label(ctx, `${j}`, rx + 6, y + rowH * 0.7);
+        ctx.fillStyle = rgba(css("--ink"), 0.1); ctx.fillRect(tx, y + rowH * 0.25, trw, rowH * 0.5);
+        ctx.fillStyle = g.open > 0.12 ? css("--accent") : rgba(css("--accent"), 0.45);
+        ctx.fillRect(tx, y + rowH * 0.25, trw * g.open, rowH * 0.5);
+        const dx = tx + trw * g.delay;
+        ctx.fillStyle = css("--accent2"); ctx.beginPath(); ctx.moveTo(dx - 4, y + rowH * 0.1); ctx.lineTo(dx + 4, y + rowH * 0.1); ctx.lineTo(dx, y + rowH * 0.32); ctx.closePath(); ctx.fill();
+      });
+      const openCount = L.gaps.filter((g) => g.open > 0.12).length;
+      $("blR").innerHTML = `<span>block <b>${(1 / n - (+G.value) / n).toFixed(4)}</b> of the loop when open</span><span>gap <b>${((+G.value) / n).toFixed(4)}</b> each</span><span>gaps open (&gt; 0.12) <b>${openCount}</b> / ${n}</span><span>phase <b>${state.phase.toFixed(3)}</b></span>`;
+    });
+    const redraw = () => fig.redraw();
+    bind("blP", "blPo", (v) => v.toFixed(2), redraw);
+    bind("blN", "blNo", (v) => `${v}`, redraw);
+    bind("blG", "blGo", (v) => v.toFixed(2), redraw);
+    Sst.addEventListener("change", redraw);
+    let on = false, last = 0;
+    const btn = $("blPl");
+    const step = (t) => {
+      if (!on) return;
+      const dt = last ? Math.min(0.05, (t - last) / 1000) : 0; last = t;
+      const v = +P.value;
+      if (v < 1) { P.value = Math.min(1, v + dt / 4); $("blPo").textContent = (+P.value).toFixed(2); }
+      if (+P.value > 0) state.phase = (state.phase + dt * 0.07) % 1;
+      redraw();
+      requestAnimationFrame(step);
+    };
+    btn.addEventListener("click", () => { on = !on; btn.textContent = on ? "pause" : "play"; last = 0; if (on) { if (+P.value >= 1) { P.value = 0; } requestAnimationFrame(step); } });
+  }
+
+  // ---- 3. Spring landing ----
+  {
+    const outQuart = (t) => 1 - (1 - t) ** 4;
+    const outCubic = (t) => 1 - (1 - t) ** 3;
+    let side = 1, wave = 1.1;
+    function simulate(dur, omega, zeta) {
+      const SWEEP = Math.PI * 2.2;
+      const from = { yaw: -side * SWEEP, pitch: 0.5 * Math.sin(wave) };
+      const guide = (u) => [from.yaw * (1 - outQuart(u)), from.pitch * (1 - outCubic(u)) + 0.22 * Math.sin(wave + u * Math.PI * 3) * (1 - outCubic(u))];
+      const g0 = guide(0), g1 = guide(1e-3);
+      const x = g0.slice(), v = g0.map((g, i) => (g1[i] - g) / 1e-3 / dur);
+      const dt = 1 / 60, out = [];
+      let t = 0, phase = "orbit", tPhase = 0, click = null, settled = null, maxOver = 0;
+      for (let f = 0; f < 60 * (dur + 6); f++) {
+        tPhase += dt; t += dt;
+        let target;
+        if (phase === "orbit") { const u = clamp01(tPhase / dur); target = guide(u); if (u >= 1) { phase = "click"; tPhase = 0; } }
+        else target = [0, 0];
+        if (settled === null) {
+          const steps = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / steps;
+          for (let k = 0; k < steps; k++) for (let i = 0; i < 2; i++) { v[i] += (omega * omega * (target[i] - x[i]) - 2 * zeta * omega * v[i]) * h; x[i] += v[i] * h; }
+          if (phase === "click") {
+            const err = Math.max(Math.abs(x[0]), Math.abs(x[1])), vel = Math.max(Math.abs(v[0]), Math.abs(v[1]));
+            if (err < 2e-4 && vel < 2e-3) { settled = t; x[0] = x[1] = 0; }
+          }
+        }
+        const angle = Math.acos(clamp(Math.cos(x[0]) * Math.cos(x[1]), -1, 1));
+        if (click === null && t > 0.6 && angle < 0.12 * DEG) click = t;
+        if (Math.sign(x[0]) === side) maxOver = Math.max(maxOver, Math.abs(x[0]));
+        out.push({ t, yaw: x[0], guide: phase === "orbit" ? target[0] : 0 });
+      }
+      return { out, click, settled, maxOver, dur };
+    }
+    const Tn = $("spT"), Wn = $("spW"), Zn = $("spZ");
+    const fig = setup($("springFig"), (W) => (W < 600 ? 1.05 : 0.56), (ctx, W, H) => {
+      stage(ctx, W, H);
+      const sim = simulate(+Tn.value, +Wn.value, +Zn.value);
+      const tEnd = sim.dur + 3;
+      const pad = 40, topH = H * 0.5;
+      const plot = (y0, h, tA, tB, yMin, yMax, title) => {
+        const X = (t) => pad + ((t - tA) / (tB - tA)) * (W - pad - 14);
+        const Y = (v) => y0 + h - ((v - yMin) / (yMax - yMin)) * h;
+        ctx.strokeStyle = css("--stage-line"); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, Y(0)); ctx.lineTo(W - 14, Y(0)); ctx.stroke();
+        label(ctx, title, pad, y0 - 6);
+        label(ctx, `${yMax.toFixed(yMax > 10 ? 0 : 1)}°`, pad - 6, Y(yMax) + 4, css("--stage-ink"), 10, "right");
+        label(ctx, `${yMin.toFixed(yMin < -10 ? 0 : 1)}°`, pad - 6, Y(yMin) + 4, css("--stage-ink"), 10, "right");
+        label(ctx, "0", pad - 6, Y(0) + 4, css("--stage-ink"), 10, "right");
+        const curve = (key, col, w, dash) => {
+          ctx.save(); ctx.beginPath(); ctx.rect(pad, y0 - 2, W - pad - 14, h + 4); ctx.clip();
+          ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash || []);
+          ctx.beginPath(); let first = true;
+          for (const p of sim.out) { if (p.t < tA || p.t > tB) continue; const x = X(p.t), y = Y(p[key] / DEG * side * -1); if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y); }
+          ctx.stroke(); ctx.restore();
+        };
+        curve("guide", css("--accent2"), 1.4, [4, 3]);
+        curve("yaw", css("--accent"), 2);
+        const mark = (t, txt, col, row) => { if (t === null || t < tA || t > tB) return; ctx.strokeStyle = col; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(X(t), y0); ctx.lineTo(X(t), y0 + h); ctx.stroke(); ctx.setLineDash([]); label(ctx, txt, X(t) + 4, y0 + 12 + row * 14, col); };
+        mark(sim.dur, "guide arrives", css("--stage-ink"), 0);
+        mark(sim.click, "click", css("--accent"), 1);
+        mark(sim.settled, "pinned", css("--ink"), 2);
+        label(ctx, `${tA.toFixed(1)} s`, X(tA), y0 + h + 14, css("--stage-ink"), 10);
+        label(ctx, `${tB.toFixed(1)} s`, X(tB), y0 + h + 14, css("--stage-ink"), 10, "right");
+      };
+      plot(26, topH - 30, 0, tEnd, -40, 400, "yaw from the sweet spot (degrees): spring — guide - -");
+      const tA = Math.max(0, sim.dur * 0.55);
+      plot(topH + 34, H - topH - 58, tA, tEnd, -3, 6, "the landing, magnified");
+      $("spR").innerHTML = `<span>overshoot <b>${(sim.maxOver / DEG).toFixed(3)}°</b></span><span>click at <b>${sim.click === null ? "—" : sim.click.toFixed(2) + " s"}</b></span><span>pinned at <b>${sim.settled === null ? "—" : sim.settled.toFixed(2) + " s"}</b></span>`;
+    });
+    const redraw = () => fig.redraw();
+    bind("spT", "spTo", (v) => `${v}`, redraw);
+    bind("spW", "spWo", (v) => `${v}`, redraw);
+    bind("spZ", "spZo", (v) => v.toFixed(2), redraw);
+    $("spN").addEventListener("click", () => { side = Math.random() < 0.5 ? -1 : 1; wave = Math.random() * Math.PI * 2; redraw(); });
+  }
+
+  // ---- 4. Unwinding ----
+  {
+    const S = $("uwS");
+    const K = JZ;
+    const fig = setup($("unwindFig"), (W) => (W < 600 ? 0.95 : 0.46), (ctx, W, H) => {
+      stage(ctx, W, H);
+      const sA = +S.value;
+      const s0 = -0.6, s1 = 1.6, pad = 44;
+      const zTop = K / 2, zMin = -K * 1.25, zMax = K * 0.75;
+      const X = (s) => pad + ((s - s0) / (s1 - s0)) * (W - pad - 16);
+      const Y = (z) => 18 + (1 - (z - zMin) / (zMax - zMin)) * (H - 46);
+      const real = (s) => zTop - K * (s - Math.floor(s));
+      // lap boundaries
+      ctx.strokeStyle = css("--stage-line"); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+      for (let k = 0; k <= 1; k++) { ctx.beginPath(); ctx.moveTo(X(k), 14); ctx.lineTo(X(k), H - 26); ctx.stroke(); label(ctx, "cut", X(k) + 4, H - 30, css("--accent")); }
+      ctx.setLineDash([]);
+      // real sawtooth
+      ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2;
+      for (let k = -1; k <= 1; k++) {
+        const a = Math.max(s0, k), b = Math.min(s1, k + 1 - 1e-4);
+        if (b <= a) continue;
+        ctx.beginPath(); ctx.moveTo(X(a), Y(real(a))); ctx.lineTo(X(b), Y(real(b))); ctx.stroke();
+      }
+      // illusion line through the receiver
+      const zA = real(sA);
+      const N = 120;
+      for (let i = 0; i < N; i++) {
+        const d0 = -0.5 + i / N, d1 = -0.5 + (i + 1) / N;
+        const fade = 1 - smoothstep(0.38, 0.48, Math.abs(0.5 * (d0 + d1)));
+        ctx.strokeStyle = rgba(css("--accent"), 0.15 + 0.85 * fade); ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(X(sA + d0), Y(zA - K * d0)); ctx.lineTo(X(sA + d1), Y(zA - K * d1)); ctx.stroke();
+      }
+      // receiver
+      ctx.fillStyle = css("--accent2"); ctx.beginPath(); ctx.arc(X(sA), Y(zA), 5, 0, Math.PI * 2); ctx.fill();
+      label(ctx, "receiver", X(sA) + 8, Y(zA) - 8, css("--accent2"));
+      label(ctx, "real solid", X(-0.55), Y(real(-0.55)) - 8, css("--ink"));
+      label(ctx, "illusion space for this receiver", X(sA - 0.45), Y(zA + K * 0.45) - 14, css("--accent"));
+      label(ctx, "loop position s →", W - 16, H - 8, css("--stage-ink"), 10, "right");
+      label(ctx, "depth (toward camera ↑)", 8, 12, css("--stage-ink"), 10);
+      // a blocker example: the point just past the cut, ahead of the receiver
+      const sB = 0.05;
+      const ds = ((sB - sA + 0.5) % 1 + 1) % 1 - 0.5;
+      const lap = Math.round(sB - sA - ds);
+      const zB = real(sB) + lap * K;
+      $("uwR").innerHTML = `<span>block at s = 0.05: <b>${ds >= 0 ? "+" : ""}${ds.toFixed(2)}</b> along the loop, lap <b>${lap}</b></span><span>placed at depth <b>${zB.toFixed(2)}</b> (really ${real(sB).toFixed(2)})</span><span>weight <b>${(1 - smoothstep(0.38, 0.48, Math.abs(ds))).toFixed(2)}</b></span>`;
+    });
+    bind("uwS", "uwSo", (v) => v.toFixed(3), () => fig.redraw());
+  }
+})();
+
+  // ---- Gallery ----
+  {
+    const g = document.getElementById("gallery");
+    g.addEventListener("click", (e) => { const t = e.target.closest(".tile"); if (t) t.classList.toggle("on"); });
+    document.getElementById("galAll").addEventListener("click", (e) => {
+      g.classList.toggle("all");
+      e.target.textContent = g.classList.contains("all") ? "show them whole" : "split them all";
+    });
+  }
+</script>
+</body>
+</html>
