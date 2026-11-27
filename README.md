@@ -58,7 +58,7 @@ Das Prinzip's pages carry no licence notice. They remain the author's copyright;
 
 - Spite: https://github.com/spite/codevember-2026
 - Theo Tillberg: https://github.com/ttillberg/codevember-2026
-- Das Prinzip: https://dasprinzip.com/codevember2026/
+- Das Prinzip: https://dasprinzip.com/codevember2026/26-anamorph.html （目录根路径 403，无索引）
 
 ## 中文说明
 

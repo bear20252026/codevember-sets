@@ -1,12 +1,12 @@
 # Codevember 2026 · 相似仓库
 
-核验日：**2026-11-27**。筛选口径：**未做满 30 天，且 GitHub 体积小于 1 GB**。GitHub 体积取 `size` 字段（KB），不是检出后的磁盘占用。
+核验日：**2026-11-27**。筛选口径：**未做满 30 天，且 GitHub 体积 < 1 GB**。GitHub 体积取 `size` 字段（KB），不是检出后的磁盘占用。
 
 | 仓库 | 作者 | 完成 | 体积 | 许可 |
 |---|---|---|---|---|
 | [Spite](https://github.com/spite/codevember-2026) | @spite | 26 / 30 | 85.3 MB | MIT |
 | [Adam Chernick](https://github.com/acher249/codevember-2026) | @acher249 | 26 / 30 | 771.2 MB | MIT |
-| [Das Prinzip](https://dasprinzip.com/codevember2026/) | Frank Reitberger | 22 / 30 | 51 MB | 无 |
+| [Das Prinzip](https://dasprinzip.com/codevember2026/26-anamorph.html) | Frank Reitberger | 22 / 30 | 51 MB | 无 |
 | [AquaNeon](https://github.com/aquaNeon/codevember-2026) | @aquaNeon | 25 / 30 | 4.3 MB | 无 |
 | [Drschizzo](https://github.com/drschizzo/Codevember) | @drschizzo | 27 / 30 | 64.1 MB | 无 |
 | [Akella](https://github.com/akella/codevember-2026) | @akella | 20 / 30 | 124.5 MB | 无 |
@@ -21,8 +21,8 @@
 
 - **Spite** — PBR、软阴影、GI、AgX，26 个日目录。 · [线上](https://spite.github.io/codevember-2026/)
 - **Adam Chernick** — 当前体积最大的一套，仍低于 1 GB；WebGPU 交互场景。 · [线上](https://adamwebsite.com/codevember/)
-- **Das Prinzip** — 单文件 HTML，22 页；01/03/04/05 缺失，无公开仓库。 · [线上](https://dasprinzip.com/codevember2026/26-anamorph.html)
-- **AquaNeon** — 25 个编号目录，体积很小；适合并入合集。 · [线上](https://codevember.vercel.app)
+- **Das Prinzip** — 单文件 HTML，22 页；01/03/04/05 缺失。无公开仓库，链接到最后一页作为入口。
+- **AquaNeon** — 25 个编号目录，体积很小；GitHub 仓库可构建，原线上域名 codevember.vercel.app 当前不解析。
 - **Drschizzo** — 27 个主题目录；缺 Orrery、Portal、Dissolve。 · [线上](https://drschizzo.github.io/Codevember/)
 - **Akella** — 20 个独立 Vite 项目，构建产物不入库。 · [线上](https://akella.github.io/codevember-2026/)
 - **Theo Tillberg** — 18 个有内容的日期目录；已在本仓库的 theo/ 内。 · [线上](https://ttillberg.github.io/codevember-2026/)

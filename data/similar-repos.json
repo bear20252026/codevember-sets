@@ -31,9 +31,9 @@
       "size": "51 MB",
       "size_kb": 52224,
       "license": "无",
-      "repo": "https://dasprinzip.com/codevember2026/",
-      "live": "https://dasprinzip.com/codevember2026/26-anamorph.html",
-      "note": "单文件 HTML，22 页；01/03/04/05 缺失，无公开仓库。"
+      "repo": "https://dasprinzip.com/codevember2026/26-anamorph.html",
+      "live": "",
+      "note": "单文件 HTML，22 页；01/03/04/05 缺失。无公开仓库，链接到最后一页作为入口。"
     },
     {
       "name": "AquaNeon",
@@ -43,8 +43,8 @@
       "size_kb": 4364,
       "license": "无",
       "repo": "https://github.com/aquaNeon/codevember-2026",
-      "live": "https://codevember.vercel.app",
-      "note": "25 个编号目录，体积很小；适合并入合集。"
+      "live": "",
+      "note": "25 个编号目录，体积很小；GitHub 仓库可构建，原线上域名 codevember.vercel.app 当前不解析。"
     },
     {
       "name": "Drschizzo",
