@@ -1,0 +1,70 @@
+name: Build, check and publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.8.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: theo/pnpm-lock.yaml
+
+      - name: Install Theo dependencies
+        working-directory: theo
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check all Theo pieces
+        working-directory: theo
+        run: pnpm -r exec tsc --noEmit
+
+      - name: Check authored JS syntax
+        run: node scripts/check-code.mjs
+
+      - name: Build Theo
+        run: pnpm -C theo build
+        env:
+          THEO_BASE_PREFIX: /codevember-sets/theo
+
+      - name: Assemble site
+        run: node scripts/build-site.mjs
+
+      - name: Smoke-test pages and local links
+        run: python3 scripts/smoke-site.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
