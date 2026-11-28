@@ -4,7 +4,7 @@
 
 | 仓库 | 作者 | 完成 | 体积 | 许可 |
 |---|---|---|---|---|
-| [Spite](https://github.com/spite/codevember-2026) | @spite | 26 / 30 | 85.3 MB | MIT |
+| [Spite](https://github.com/spite/codevember-2026) | @spite | 27 / 30 | 87.0 MB | MIT |
 | [Adam Chernick](https://github.com/acher249/codevember-2026) | @acher249 | 26 / 30 | 771.2 MB | MIT |
 | [Das Prinzip](https://dasprinzip.com/codevember2026/26-anamorph.html) | Frank Reitberger | 22 / 30 | 51 MB | 无 |
 | [AquaNeon](https://github.com/aquaNeon/codevember-2026) | @aquaNeon | 25 / 30 | 4.3 MB | 无 |
@@ -19,7 +19,7 @@
 
 ## 说明
 
-- **Spite** — PBR、软阴影、GI、AgX，26 个日目录。 · [线上](https://spite.github.io/codevember-2026/)
+- **Spite** — PBR、软阴影、GI、AgX，27 个日目录。 · [线上](https://spite.github.io/codevember-2026/)
 - **Adam Chernick** — 当前体积最大的一套，仍低于 1 GB；WebGPU 交互场景。 · [线上](https://adamwebsite.com/codevember/)
 - **Das Prinzip** — 单文件 HTML，22 页；01/03/04/05 缺失。无公开仓库，链接到最后一页作为入口。
 - **AquaNeon** — 25 个编号目录，体积很小；GitHub 仓库可构建，原线上域名 codevember.vercel.app 当前不解析。
@@ -35,7 +35,7 @@
 ## 边界案例
 
 - **Keaukraine** — 30 个目录全是 “Nothing here” 占位，属于“没装满”的反例。 · [仓库](https://github.com/keaukraine/codevember-2026)
-- **bear/codevember-sets（本仓库）** — Spite 26 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。 · [仓库](https://github.com/bear20252026/codevember-sets)
+- **bear/codevember-sets（本仓库）** — Spite 27 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。 · [仓库](https://github.com/bear20252026/codevember-sets)
 - **zhulin025/codevember-archive** — 社区作品目录/采集器，不是代码合集。 · [仓库](https://github.com/zhulin025/codevember-archive)
 
 > 所有列出的正式套系都在 1 GB 以内；最大的是 Adam Chernick 的 771.2 MB。Karim Beyrouti 有 16 个线上页面，但没有公开源码仓库，因此未列入。

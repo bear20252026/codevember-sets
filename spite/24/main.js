@@ -177,7 +177,8 @@ for (let i = 0; i < SLOT_COUNT; i++) {
     material,
     materials: new Map([[0, material]]),
     assignedGen: null,
-    specKey: "",
+    specMode: "",
+    specSeed: null,
     yaw: 0,
   });
 }
@@ -239,7 +240,10 @@ function seedInt(seed) {
 }
 const seedEpochs = [{ fromGen: -Infinity, seed: seedInt(getSeed()) }];
 function seedForGen(gen) {
-  for (let i = seedEpochs.length - 1; i > 0; i--) if (gen >= seedEpochs[i].fromGen) return seedEpochs[i].seed;
+  for (let i = seedEpochs.length - 1; i > 0; i--) {
+    const e = seedEpochs[i];
+    if (e.toGen !== undefined ? gen <= e.toGen : gen >= e.fromGen) return e.seed;
+  }
   return seedEpochs[0].seed;
 }
 
@@ -276,13 +280,14 @@ function updateNest(u, sceneTime, glossBias) {
     const slotIdx = ((gen % SLOT_COUNT) + SLOT_COUNT) % SLOT_COUNT;
     const slot = slots[slotIdx];
 
-    const specKey = `${modeKey}|${seedForGen(gen)}`;
-    if (slot.assignedGen !== gen || slot.specKey !== specKey) {
+    const seed = seedForGen(gen);
+    if (slot.assignedGen !== gen || slot.specMode !== modeKey || slot.specSeed !== seed) {
       const spec = getDollSpec(gen, seedForGen(gen), opts);
       applySlotSpec(slot, spec, -glossBias);
       slot.yaw = dollYaw(gen);
       slot.assignedGen = gen;
-      slot.specKey = specKey;
+      slot.specMode = modeKey;
+      slot.specSeed = seed;
     } else {
       slot.material.uniforms.uRoughnessBias.value = -glossBias;
     }
@@ -394,18 +399,21 @@ function updateNest(u, sceneTime, glossBias) {
   }
 }
 
-// Click / tap on canvas (without dragging) pops the next doll
+// Click / tap on canvas (without dragging) pops the next doll. Only a primary-button press counts, and a second finger
+// cancels it.
 let downX = 0;
 let downY = 0;
+let tapId = null;
 renderer.domElement.addEventListener("pointerdown", (e) => {
+  tapId = e.isPrimary && e.button === 0 ? e.pointerId : null;
   downX = e.clientX;
   downY = e.clientY;
 });
 renderer.domElement.addEventListener("pointerup", (e) => {
-  if (Math.hypot(e.clientX - downX, e.clientY - downY) < 6) {
-    popNext();
-  }
+  if (e.pointerId === tapId && Math.hypot(e.clientX - downX, e.clientY - downY) < 6) popNext();
+  tapId = null;
 });
+renderer.domElement.addEventListener("pointercancel", () => (tapId = null));
 
 // Centered studio framing around the Matryoshka with full 3D orbit + roll
 camera.position.set(0.25, 0.35, 4.6);
@@ -454,8 +462,11 @@ onRandomize(() => {
   if (!booted) return;
   // The dolls on screen keep their paint: the new seed starts at the first doll still hidden (the one inside the
   // hero until it starts opening, then the one inside that), so it shows at the next opening. The nest spins once.
+  // Closing, it starts at the first outer doll still out of view (base - 1 shows once frac drops below 0.05).
   const base = Math.floor(nestU);
-  seedEpochs.push({ fromGen: nestU - base < 0.03 ? base + 1 : base + 2, seed: seedInt(getSeed()) });
+  const seed = seedInt(getSeed());
+  if (params.direction() === "Close") seedEpochs.push({ toGen: nestU - base > 0.06 ? base - 1 : base - 2, seed });
+  else seedEpochs.push({ fromGen: nestU - base < 0.03 ? base + 1 : base + 2, seed });
   if (seedEpochs.length > 8) seedEpochs.splice(1, 1);
   // Only the whole doll in the middle (and the ones inside it) spins, not the halves already flying off.
   spinFromGen = nestU - base < 0.03 ? base : base + 1;
@@ -484,6 +495,7 @@ const bgColor = new Color(startBackdrop.bg);
 const cycColor = new Color(startBackdrop.cyc);
 const targetBgColor = new Color();
 const targetCycColor = new Color();
+let lastBackdrop = null;
 pipeline.background.copy(bgColor);
 backdrop.material.color.copy(cycColor);
 backdrop.material.uniforms.backdropLevel.value = startBackdrop.level;
@@ -587,8 +599,11 @@ render(({ time, dt, frame }) => {
 
   const kBg = 1 - Math.exp(-2.2 * dt);
   const bSpec = getTargetBackdrop(nestU);
-  targetBgColor.set(bSpec.bg);
-  targetCycColor.set(bSpec.cyc);
+  if (bSpec !== lastBackdrop) {
+    lastBackdrop = bSpec;
+    targetBgColor.set(bSpec.bg);
+    targetCycColor.set(bSpec.cyc);
+  }
   bgColor.lerp(targetBgColor, kBg);
   cycColor.lerp(targetCycColor, kBg);
   pipeline.background.copy(bgColor);

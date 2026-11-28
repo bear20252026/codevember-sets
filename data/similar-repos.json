@@ -5,13 +5,13 @@
     {
       "name": "Spite",
       "author": "@spite",
-      "days": "26 / 30",
-      "size": "85.3 MB",
-      "size_kb": 87347,
+      "days": "27 / 30",
+      "size": "87.0 MB",
+      "size_kb": 89133,
       "license": "MIT",
       "repo": "https://github.com/spite/codevember-2026",
       "live": "https://spite.github.io/codevember-2026/",
-      "note": "PBR、软阴影、GI、AgX，26 个日目录。"
+      "note": "PBR、软阴影、GI、AgX，27 个日目录。"
     },
     {
       "name": "Adam Chernick",
@@ -152,7 +152,7 @@
       "size_kb": 160190,
       "license": "Spite/Theo MIT；Das 无",
       "repo": "https://github.com/bear20252026/codevember-sets",
-      "note": "Spite 26 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。"
+      "note": "Spite 27 + Theo 18 + Das Prinzip 22 页；docs 200 MB，git 对象约 193 MB，仍在 1 GB 内。"
     },
     {
       "name": "zhulin025/codevember-archive",
