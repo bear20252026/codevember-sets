@@ -22,7 +22,7 @@ A parallel repository to [`nodevember`](https://github.com/bear20252026/nodevemb
 
 ## Similar repositories (2026-11-27)
 
-The full table is in [`SIMILAR.md`](./SIMILAR.md). Quick read: the closest sets are **Spite** (26/30, 85.3 MB, MIT), **Adam Chernick** (26/30, 771.2 MB, MIT), **AquaNeon** (25/30, 4.3 MB), **Drschizzo** (27/30, 64.1 MB) and **Akella** (20/30, 124.5 MB). All listed sets are under 1 GB; Adam is the largest and closest to the limit.
+The full table is in [`SIMILAR.md`](./SIMILAR.md). Quick read: the closest sets are **Spite** (26/30, 85.3 MB, MIT), **Adam Chernick** (26/30, 771.2 MB, MIT), **AquaNeon** (25/30, 4.3 MB), **Drschizzo** (27/30, 64.1 MB) and **Akella** (21/30, 156.8 MB). All listed sets are under 1 GB; Adam is the largest and closest to the limit.
 
 `Karim Beyrouti` has 16 live pages but no public source repository, so he is not in the table.
 

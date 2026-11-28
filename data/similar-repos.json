@@ -60,13 +60,13 @@
     {
       "name": "Akella",
       "author": "@akella",
-      "days": "20 / 30",
-      "size": "124.5 MB",
-      "size_kb": 127513,
+      "days": "21 / 30",
+      "size": "156.8 MB",
+      "size_kb": 160552,
       "license": "无",
       "repo": "https://github.com/akella/codevember-2026",
       "live": "https://akella.github.io/codevember-2026/",
-      "note": "20 个独立 Vite 项目，构建产物不入库。"
+      "note": "21 个独立 Vite 项目，新增 Day 21「Bolt」；构建产物不入库。"
     },
     {
       "name": "Theo Tillberg",
